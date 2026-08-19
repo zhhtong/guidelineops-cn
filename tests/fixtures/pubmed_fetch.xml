@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>12345678</PMID>
+      <Article>
+        <Journal>
+          <JournalIssue><PubDate><Year>2024</Year></PubDate></JournalIssue>
+          <Title>Example Medical Journal</Title>
+        </Journal>
+        <ArticleTitle>Clinical Practice Guideline for COPD</ArticleTitle>
+        <Abstract><AbstractText Label="BACKGROUND">Guideline summary.</AbstractText></Abstract>
+        <AuthorList>
+          <Author><LastName>Wang</LastName><ForeName>Li</ForeName></Author>
+        </AuthorList>
+        <PublicationTypeList><PublicationType>Practice Guideline</PublicationType></PublicationTypeList>
+      </Article>
+      <MeshHeadingList><MeshHeading><DescriptorName>COPD</DescriptorName></MeshHeading></MeshHeadingList>
+    </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">12345678</ArticleId>
+        <ArticleId IdType="doi">10.1000/EXAMPLE</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+</PubmedArticleSet>
