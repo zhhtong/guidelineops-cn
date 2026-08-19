@@ -1,7 +1,13 @@
+import json
 from datetime import timezone
 
 from guidelineops.models import ReviewStatus, SourceRecord
-from guidelineops.quality import Completeness, build_quality_report
+from guidelineops.quality import (
+    Completeness,
+    build_quality_report,
+    render_markdown,
+    report_json,
+)
 
 
 def test_build_quality_report_returns_zero_safe_empty_report() -> None:
@@ -78,3 +84,52 @@ def test_build_quality_report_counts_fields_statuses_and_risks() -> None:
     assert report.risk_items[0].title == "COPD guideline"
     assert len(report.duplicate_candidates) == 1
     assert report.duplicate_candidates[0].kind == "exact_title"
+
+
+def test_report_json_serializes_nested_dataclasses_as_utf8_json() -> None:
+    report = build_quality_report(
+        [
+            SourceRecord(
+                source="cnki",
+                source_record_id="1",
+                title="中文指南",
+            )
+        ],
+        canonical_records=0,
+    )
+
+    rendered = report_json(report)
+    payload = json.loads(rendered)
+
+    assert rendered.endswith("\n")
+    assert '\n  "generated_at": ' in rendered
+    assert "中文指南" in rendered
+    assert payload["generated_at"] == report.generated_at.isoformat()
+    assert payload["field_completeness"]["doi"] == {
+        "present": 0,
+        "missing": 1,
+        "rate": 0.0,
+    }
+    assert payload["risk_items"][0] == {
+        "source": "cnki",
+        "source_record_id": "1",
+        "title": "中文指南",
+        "reason": "missing_publication_year",
+    }
+    assert payload["duplicate_candidates"] == []
+
+
+def test_render_markdown_includes_tables_and_explicit_empty_sections() -> None:
+    report = build_quality_report([], canonical_records=0)
+
+    markdown = render_markdown(report)
+
+    assert f"Generated at: {report.generated_at.isoformat()}" in markdown
+    assert "## Headline counts" in markdown
+    assert "| Source | Count |" in markdown
+    assert "| Review status | Count |" in markdown
+    assert "| Field | Present | Missing | Rate |" in markdown
+    assert "## Risk items" in markdown
+    assert "No risk items found." in markdown
+    assert "## Duplicate candidates" in markdown
+    assert "No duplicate candidates found." in markdown
