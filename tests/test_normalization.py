@@ -24,4 +24,3 @@ def test_normalize_doi_returns_none_for_empty_values() -> None:
 
 def test_normalize_title_returns_none_for_none() -> None:
     assert normalize_title(None) is None
-

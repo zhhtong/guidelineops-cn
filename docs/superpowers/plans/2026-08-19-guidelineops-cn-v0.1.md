@@ -96,7 +96,6 @@ Run: `git add pyproject.toml .gitignore .env.example README.md README.zh-CN.md g
 ```python
 def test_normalize_doi_removes_url_and_lowercases() -> None:
     assert normalize_doi("https://doi.org/10.1000/ABC.1 ") == "10.1000/abc.1"
-
 def test_snapshot_writes_hash_and_path(tmp_path: Path) -> None:
     snapshot = write_snapshot(tmp_path, "pubmed", "123", b"<xml/>")
     assert snapshot.sha256 == hashlib.sha256(b"<xml/>").hexdigest()
@@ -141,7 +140,6 @@ def test_upsert_is_idempotent(session: Session, record: SourceRecord) -> None:
     upsert_source_record(session, record)
     upsert_source_record(session, record)
     assert session.scalar(select(func.count()).select_from(SourceRecordRow)) == 1
-
 def test_four_sources_with_one_doi_form_one_canonical_group() -> None:
     result = group_records(make_same_doi_records(4))
     assert len(result.canonical_groups) == 1
@@ -318,6 +316,7 @@ Run: `git add guidelineops tests && git commit -m "feat: import cnki and wanfang
 def test_export_jsonl_is_utf8_and_contains_record(tmp_path: Path) -> None:
     path = export_records(records_with_chinese_title(), tmp_path, "jsonl")
     assert "指南" in path.read_text(encoding="utf-8")
+
 
 def test_discover_reports_actual_counts(mocked_services: None) -> None:
     result = CliRunner().invoke(app, ["discover", "--disease", "COPD", "--limit", "2"])

@@ -3,6 +3,13 @@
 data/fulltext/
 data/raw/
 data/*.db
+data/*/*.db
+data/import_errors.csv
+data/*/guideline_candidates.*
+data/**/*.db
+data/**/*.csv
+data/**/*.jsonl
+data/**/raw/
 *.caj
 licensed_content/
 

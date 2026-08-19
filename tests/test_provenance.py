@@ -62,4 +62,3 @@ def test_snapshot_accepts_explicit_retrieval_timestamp() -> None:
     )
 
     assert snapshot.retrieved_at == timestamp
-
