@@ -1,0 +1,18 @@
+{
+  "message": {
+    "total-results": 1,
+    "items": [
+      {
+        "DOI": "10.1000/EXAMPLE",
+        "title": ["Clinical Practice Guideline for COPD"],
+        "author": [{"family": "Wang", "given": "Li"}],
+        "container-title": ["Example Medical Journal"],
+        "published": {"date-parts": [[2024, 5, 1]]},
+        "publisher": "Example Publisher",
+        "URL": "https://doi.org/10.1000/EXAMPLE",
+        "ISSN": ["1234-5678"],
+        "license": [{"URL": "https://creativecommons.org/licenses/by/4.0/"}]
+      }
+    ]
+  }
+}

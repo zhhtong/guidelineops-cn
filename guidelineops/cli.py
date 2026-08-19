@@ -9,6 +9,7 @@ import typer
 
 from .config import Settings
 from .sources.base import AdapterConfigurationError
+from .sources.crossref import CrossrefAdapter
 from .sources.pubmed import PubMedAdapter
 
 app = typer.Typer(
@@ -44,6 +45,28 @@ def pubmed_search(
 
     for record in records:
         typer.echo(json.dumps(record.model_dump(mode="json"), ensure_ascii=False))
+
+
+@app.command("crossref-search")
+def crossref_search(
+    query: str,
+    limit: int = typer.Option(20, min=1, max=1000),
+) -> None:
+    """Search Crossref works by title and print normalized JSON Lines."""
+
+    records = asyncio.run(CrossrefAdapter(Settings()).search(query, limit=limit))
+    for record in records:
+        typer.echo(json.dumps(record.model_dump(mode="json"), ensure_ascii=False))
+
+
+@app.command("crossref-enrich")
+def crossref_enrich(
+    doi: str = typer.Argument(..., help="DOI to resolve through Crossref."),
+) -> None:
+    """Resolve one DOI and print the enriched Crossref metadata."""
+
+    record = asyncio.run(CrossrefAdapter(Settings()).lookup_doi(doi))
+    typer.echo(json.dumps(record.model_dump(mode="json"), ensure_ascii=False))
 
 
 if __name__ == "__main__":
