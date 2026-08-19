@@ -5,6 +5,8 @@ data/raw/
 data/*.db
 data/*/*.db
 data/import_errors.csv
+data/quality_report.json
+data/quality_report.md
 data/*/guideline_candidates.*
 data/**/*.db
 data/**/*.csv

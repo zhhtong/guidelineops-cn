@@ -47,11 +47,18 @@ uv run guidelineops crossref-enrich 10.1000/example
 uv run guidelineops import-file --source cnki exports/cnki.csv
 uv run guidelineops import-file --source wanfang exports/wanfang.csv
 uv run guidelineops discover --disease "COPD guideline" --since 2015 --limit 20
+uv run guidelineops quality-report
 ```
 
 `discover` writes `data/guideline_candidates.csv`,
 `data/guideline_candidates.jsonl`, and a SQLite database. Raw API responses are
 stored under `data/raw/` with SHA-256 provenance and are ignored by Git.
+
+`quality-report` reads the configured SQLite database and writes metadata quality
+signals to `data/quality_report.json` and `data/quality_report.md` (or the
+configured `DATA_DIR`). The report is for research and education only: it does
+not provide clinical recommendations and never automatically approves or
+rejects records.
 
 ## Source and copyright boundary
 

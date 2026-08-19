@@ -21,6 +21,7 @@ from .database import (
 from .dedup import group_records
 from .export import export_records
 from .models import SourceRecord
+from .quality import build_quality_report, render_markdown, report_json
 from .sources.base import AdapterConfigurationError
 from .sources.cnki_import import import_cnki_csv
 from .sources.crossref import CrossrefAdapter
@@ -149,6 +150,35 @@ def discover(
     typer.echo(f"Duplicate groups: {len(result.candidates)}")
     typer.echo(f"CSV: {csv_path}")
     typer.echo(f"JSONL: {jsonl_path}")
+
+
+@app.command("quality-report")
+def quality_report() -> None:
+    """Write a deterministic metadata quality report for persisted records."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        rows = list(session.scalars(select(SourceRecordRow)))
+        canonical_count = session.scalar(
+            select(func.count()).select_from(CanonicalGuidelineRow)
+        )
+
+    records = [SourceRecord.model_validate(row.record_data) for row in rows]
+    report = build_quality_report(
+        records, canonical_records=canonical_count or 0
+    )
+
+    output_dir = Path(settings.data_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "quality_report.json"
+    markdown_path = output_dir / "quality_report.md"
+    json_path.write_text(report_json(report), encoding="utf-8")
+    markdown_path.write_text(render_markdown(report), encoding="utf-8")
+
+    typer.echo(f"Records: {report.total_records}")
+    typer.echo(f"JSON: {json_path}")
+    typer.echo(f"Markdown: {markdown_path}")
 
 
 async def _discover_records(

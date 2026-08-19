@@ -36,11 +36,16 @@ uv run guidelineops crossref-enrich 10.1000/example
 uv run guidelineops import-file --source cnki exports/cnki.csv
 uv run guidelineops import-file --source wanfang exports/wanfang.csv
 uv run guidelineops discover --disease "COPD guideline" --since 2015 --limit 20
+uv run guidelineops quality-report
 ```
 
 `discover` 会生成 `data/guideline_candidates.csv`、
 `data/guideline_candidates.jsonl` 和 SQLite 数据库；API 原始响应保存在
 `data/raw/`，带有 SHA-256 证据链并被 Git 忽略。
+
+`quality-report` 会读取配置的 SQLite 数据库，并在 `data/quality_report.json`
+和 `data/quality_report.md`（或配置的 `DATA_DIR`）中生成元数据质量信号。该
+报告仅用于研究和教育，不提供临床推荐，也不会自动审批或拒绝任何记录。
 
 ## 数据与版权边界
 
