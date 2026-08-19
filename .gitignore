@@ -1,6 +1,8 @@
 .env
 .private/
 data/fulltext/
+data/raw/
+data/*.db
 *.caj
 licensed_content/
 
