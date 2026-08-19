@@ -39,13 +39,17 @@ def test_string_enums_expose_the_normalized_values() -> None:
 
 
 def test_source_record_requires_only_the_three_identity_fields() -> None:
-    record = SourceRecord(id="r-1", source="pubmed", source_record_id="123")
+    record = SourceRecord(
+        source="pubmed",
+        source_record_id="123",
+        title="Clinical guideline",
+    )
 
-    assert record.id == "r-1"
+    assert record.id is None
     assert record.source == "pubmed"
     assert record.source_record_id == "123"
-    assert record.title is None
-    assert record.title_normalized is None
+    assert record.title == "Clinical guideline"
+    assert record.title_normalized == "clinical guideline"
     assert record.authors == []
     assert record.disease_tags == []
     assert record.document_type is DocumentType.unknown
@@ -71,9 +75,22 @@ def test_source_record_normalizes_a_supplied_title_and_keeps_metadata() -> None:
     assert record.metadata["source_payload"]["score"] == 1
 
 
-def test_source_record_rejects_missing_identity_fields() -> None:
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"source_record_id": "123", "title": "Clinical guideline"},
+        {"source": "pubmed", "title": "Clinical guideline"},
+        {"source": "pubmed", "source_record_id": "123"},
+        {"source": " ", "source_record_id": "123", "title": "Clinical guideline"},
+        {"source": "pubmed", "source_record_id": " ", "title": "Clinical guideline"},
+        {"source": "pubmed", "source_record_id": "123", "title": " "},
+    ],
+)
+def test_source_record_rejects_missing_or_blank_identity_fields(
+    payload: dict[str, str],
+) -> None:
     with pytest.raises(ValidationError):
-        SourceRecord(source="pubmed", source_record_id="123")
+        SourceRecord(**payload)
 
 
 def test_settings_are_optional_and_have_safe_defaults(

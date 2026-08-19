@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .normalization import normalize_doi, normalize_title
 
@@ -52,7 +52,7 @@ class SourceRecord(BaseModel):
     id: str | None = None
     source: str
     source_record_id: str
-    title: str | None = None
+    title: str
     title_normalized: str | None = None
     authors: list[str] = Field(default_factory=list)
     organization: str | None = None
@@ -73,12 +73,19 @@ class SourceRecord(BaseModel):
     review_status: ReviewStatus = ReviewStatus.candidate
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("source", "source_record_id", "title")
+    @classmethod
+    def require_non_empty_identity(cls, value: str) -> str:
+        """Reject missing or whitespace-only source identity values."""
+
+        if not value.strip():
+            raise ValueError("identity fields must not be empty")
+        return value
+
     @model_validator(mode="after")
     def derive_normalized_values(self) -> SourceRecord:
         """Keep derived title/DOI values consistent with their source fields."""
 
-        if self.id is None and self.title is None:
-            raise ValueError("at least one of id or title is required")
         self.title_normalized = normalize_title(self.title)
         self.doi = normalize_doi(self.doi)
         return self
