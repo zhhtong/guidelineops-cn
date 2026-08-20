@@ -109,6 +109,7 @@ def test_claim_and_reject_require_owner_and_reason() -> None:
             "claimed",
             "rejected",
         ]
+        assert event_mapping(events[0])["created_at"].endswith("+00:00")
 
 
 def test_review_sync_does_not_change_source_record_data() -> None:

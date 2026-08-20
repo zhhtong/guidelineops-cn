@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -276,4 +276,8 @@ def _require_status(status: str) -> None:
 
 
 def _isoformat(value: datetime | None) -> str | None:
-    return value.isoformat() if value is not None else None
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()

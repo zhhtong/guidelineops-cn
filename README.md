@@ -23,7 +23,8 @@ flowchart LR
   B --> D
   D --> E["SQLite + provenance"]
   E --> F["Canonical groups / duplicate candidates"]
-  F --> G["CSV / JSONL review export"]
+  F --> G["Quality report"]
+  G --> H["Review tasks + audit events"]
 ```
 
 ## Install
