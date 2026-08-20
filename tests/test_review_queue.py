@@ -1,5 +1,6 @@
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from guidelineops.database import (
@@ -124,3 +125,58 @@ def test_review_sync_does_not_change_source_record_data() -> None:
         sync_review_tasks(db_session, [record])
 
     assert record.model_dump(mode="json") == before
+
+
+def test_claim_is_atomic_for_two_stale_sessions(tmp_path) -> None:
+    database_url = f"sqlite+pysqlite:///{(tmp_path / 'queue.db').as_posix()}"
+    session_factory = create_session_factory(database_url)
+    init_database(session_factory.kw["bind"])
+
+    with session_factory() as first, session_factory() as second:
+        sync_review_tasks(
+            first,
+            [SourceRecord(source="pubmed", source_record_id="1", title="COPD")],
+        )
+        first.commit()
+        first_task = first.scalar(select(ReviewTaskRow).order_by(ReviewTaskRow.id))
+        second_task = second.scalar(select(ReviewTaskRow).order_by(ReviewTaskRow.id))
+        assert first_task is not None and second_task is not None
+
+        claim_task(first, first_task.id, reviewer="alice")
+        first.commit()
+
+        with pytest.raises(ReviewQueueError, match="cannot be claimed from claimed"):
+            claim_task(second, second_task.id, reviewer="bob")
+
+
+def test_review_events_are_immutable_and_foreign_keys_are_enforced() -> None:
+    with session() as db_session:
+        sync_review_tasks(
+            db_session,
+            [SourceRecord(source="pubmed", source_record_id="1", title="COPD")],
+        )
+        db_session.commit()
+        event_row = db_session.scalar(
+            select(ReviewEventRow).order_by(ReviewEventRow.id)
+        )
+        assert event_row is not None
+
+        event_row.reason = "tampered"
+        with pytest.raises(ValueError, match="immutable"):
+            db_session.commit()
+        db_session.rollback()
+
+        with pytest.raises(ValueError, match="immutable"):
+            db_session.delete(event_row)
+            db_session.commit()
+        db_session.rollback()
+
+        db_session.add(
+            ReviewEventRow(
+                task_id=999,
+                event_type="manual",
+                actor="tester",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            db_session.commit()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .database import ReviewEventRow, ReviewTaskRow
@@ -157,11 +157,25 @@ def claim_task(session: Session, task_id: int, *, reviewer: str) -> ReviewTaskRo
     if task.status not in {"open", "deferred"}:
         raise ReviewQueueError(f"task {task_id} cannot be claimed from {task.status}")
     now = datetime.utcnow()
-    task.status = "claimed"
-    task.claimed_by = reviewer
-    task.claimed_at = now
-    task.resolved_at = None
-    task.updated_at = now
+    result = session.execute(
+        update(ReviewTaskRow)
+        .where(
+            ReviewTaskRow.id == task_id,
+            ReviewTaskRow.status.in_(("open", "deferred")),
+        )
+        .values(
+            status="claimed",
+            claimed_by=reviewer,
+            claimed_at=now,
+            resolved_at=None,
+            updated_at=now,
+        )
+        .execution_options(synchronize_session="fetch")
+    )
+    if result.rowcount != 1:
+        session.refresh(task)
+        raise ReviewQueueError(f"task {task_id} cannot be claimed from {task.status}")
+    session.refresh(task)
     _add_event(session, task, event_type="claimed", actor=reviewer)
     session.flush()
     return task
@@ -192,14 +206,27 @@ def decide_task(
         raise ReviewQueueError(f"task {task_id} is claimed by another reviewer")
 
     now = datetime.utcnow()
-    task.status = decision
-    task.updated_at = now
+    values: dict[str, object] = {"status": decision, "updated_at": now}
     if decision == "deferred":
-        task.claimed_by = None
-        task.claimed_at = None
-        task.resolved_at = None
+        values.update(claimed_by=None, claimed_at=None, resolved_at=None)
     else:
-        task.resolved_at = now
+        values["resolved_at"] = now
+    result = session.execute(
+        update(ReviewTaskRow)
+        .where(
+            ReviewTaskRow.id == task_id,
+            ReviewTaskRow.status == "claimed",
+            ReviewTaskRow.claimed_by == reviewer,
+        )
+        .values(**values)
+        .execution_options(synchronize_session="fetch")
+    )
+    if result.rowcount != 1:
+        session.refresh(task)
+        if task.status != "claimed":
+            raise ReviewQueueError(f"task {task_id} is not claimed")
+        raise ReviewQueueError(f"task {task_id} is claimed by another reviewer")
+    session.refresh(task)
     _add_event(session, task, event_type=decision, actor=reviewer, reason=reason)
     session.flush()
     return task

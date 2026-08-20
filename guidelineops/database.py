@@ -5,7 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint, select
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+    event,
+    select,
+)
 from sqlalchemy import create_engine as _create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import (
@@ -130,10 +138,39 @@ class ReviewEventRow(Base):
     task: Mapped[ReviewTaskRow] = relationship(back_populates="events")
 
 
+@event.listens_for(ReviewEventRow, "before_update")
+def _reject_review_event_update(
+    mapper: object, connection: object, target: ReviewEventRow
+) -> None:
+    """Keep the audit trail append-only at the ORM boundary."""
+
+    raise ValueError(f"review event {target.id} is immutable")
+
+
+@event.listens_for(ReviewEventRow, "before_delete")
+def _reject_review_event_delete(
+    mapper: object, connection: object, target: ReviewEventRow
+) -> None:
+    """Prevent deletion of audit events through ORM sessions."""
+
+    raise ValueError(f"review event {target.id} is immutable")
+
+
 def create_engine(database_url: str = "sqlite+pysqlite:///guidelineops.db") -> Engine:
     """Create a SQLAlchemy 2 engine suitable for SQLite."""
 
-    return _create_engine(database_url)
+    engine = _create_engine(database_url)
+    if engine.dialect.name == "sqlite":
+
+        @event.listens_for(engine, "connect")
+        def _enable_foreign_keys(dbapi_connection: object, _: object) -> None:
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+            finally:
+                cursor.close()
+
+    return engine
 
 
 def create_session_factory(
