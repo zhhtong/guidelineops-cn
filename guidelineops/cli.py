@@ -29,6 +29,8 @@ from .review_queue import (
     ReviewQueueError,
     claim_task,
     decide_task,
+    event_mapping,
+    list_review_events,
     list_review_tasks,
     sync_review_tasks,
     task_mapping,
@@ -233,6 +235,23 @@ def review_list(
             _exit_review_error(session, error)
         for task in tasks:
             typer.echo(json.dumps(task_mapping(task), ensure_ascii=False))
+
+
+@app.command("review-events")
+def review_events(
+    task_id: int = typer.Argument(..., help="Review task ID."),
+) -> None:
+    """Print the append-only audit history for one review task."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        try:
+            events = list_review_events(session, task_id)
+        except ReviewQueueError as error:
+            _exit_review_error(session, error)
+        for event in events:
+            typer.echo(json.dumps(event_mapping(event), ensure_ascii=False))
 
 
 @app.command("review-claim")

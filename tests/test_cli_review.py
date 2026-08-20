@@ -54,6 +54,13 @@ def test_review_cli_sync_claim_and_reject(monkeypatch, tmp_path: Path) -> None:
     assert claimed.exit_code == 0, claimed.output
     assert rejected.exit_code == 0, rejected.output
     assert json.loads(rejected.output)["status"] == "rejected"
+    events = runner.invoke(app, ["review-events", str(task_id)])
+    assert events.exit_code == 0, events.output
+    assert [json.loads(line)["event_type"] for line in events.output.splitlines()] == [
+        "synced",
+        "claimed",
+        "rejected",
+    ]
 
 
 def test_review_cli_reject_requires_reason(monkeypatch, tmp_path: Path) -> None:

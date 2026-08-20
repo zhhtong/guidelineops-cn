@@ -13,6 +13,8 @@ from guidelineops.review_queue import (
     ReviewQueueError,
     claim_task,
     decide_task,
+    event_mapping,
+    list_review_events,
     sync_review_tasks,
 )
 
@@ -101,6 +103,12 @@ def test_claim_and_reject_require_owner_and_reason() -> None:
         assert task.status == "rejected"
         assert task.claimed_by == "李医生"
         assert task.resolved_at is not None
+        events = list_review_events(db_session, task.id)
+        assert [event["event_type"] for event in map(event_mapping, events)] == [
+            "synced",
+            "claimed",
+            "rejected",
+        ]
 
 
 def test_review_sync_does_not_change_source_record_data() -> None:

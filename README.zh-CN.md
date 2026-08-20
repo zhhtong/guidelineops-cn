@@ -42,6 +42,7 @@ uv run guidelineops discover --disease "COPD guideline" --since 2015 --limit 20
 uv run guidelineops quality-report
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
+uv run guidelineops review-events 12
 uv run guidelineops review-claim 12 --reviewer "李医生"
 uv run guidelineops review-reject 12 --reviewer "李医生" --reason "非正式指南"
 ```

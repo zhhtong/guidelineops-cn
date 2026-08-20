@@ -136,6 +136,19 @@ def list_review_tasks(
     return list(session.scalars(statement))
 
 
+def list_review_events(session: Session, task_id: int) -> list[ReviewEventRow]:
+    """Return append-only audit events for one task in insertion order."""
+
+    _task_or_error(session, task_id)
+    return list(
+        session.scalars(
+            select(ReviewEventRow)
+            .where(ReviewEventRow.task_id == task_id)
+            .order_by(ReviewEventRow.id)
+        )
+    )
+
+
 def claim_task(session: Session, task_id: int, *, reviewer: str) -> ReviewTaskRow:
     """Claim one open or deferred task for the named reviewer."""
 
@@ -207,6 +220,20 @@ def task_mapping(task: ReviewTaskRow) -> dict[str, object]:
         "created_at": _isoformat(task.created_at),
         "updated_at": _isoformat(task.updated_at),
         "last_seen_at": _isoformat(task.last_seen_at),
+    }
+
+
+def event_mapping(event: ReviewEventRow) -> dict[str, object]:
+    """Return a JSON-compatible representation of one audit event."""
+
+    return {
+        "id": event.id,
+        "task_id": event.task_id,
+        "event_type": event.event_type,
+        "actor": event.actor,
+        "reason": event.reason,
+        "payload": event.payload,
+        "created_at": _isoformat(event.created_at),
     }
 
 

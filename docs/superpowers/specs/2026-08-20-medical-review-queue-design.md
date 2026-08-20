@@ -18,6 +18,7 @@ synchronization, and five CLI actions:
 ```bash
 guidelineops review-sync
 guidelineops review-list --status open
+guidelineops review-events 12
 guidelineops review-claim 12 --reviewer "张医生"
 guidelineops review-approve 12 --reviewer "张医生" --note "已核对原始来源"
 guidelineops review-reject 12 --reviewer "张医生" --reason "非正式指南"
@@ -102,6 +103,9 @@ stateDiagram-v2
 `review-list` accepts an optional `--status` filter and prints deterministic
 JSON Lines, ordered by task ID. Each line contains the task identity, type,
 status, claim metadata, timestamps, and payload. It never emits an audit event.
+`review-events TASK_ID` prints that task's append-only event history in event-ID
+order, allowing a medical lead to inspect the complete chain without opening
+SQLite directly.
 
 The existing quality report remains a read-only aggregate. Future reports may
 summarize task status, but v0.3 does not change the quality-report schema.
