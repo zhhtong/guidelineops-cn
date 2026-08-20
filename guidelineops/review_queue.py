@@ -15,6 +15,28 @@ from .quality import build_quality_report
 _ACTIVE_STATUSES = {"open", "claimed", "deferred"}
 _DECISIONS = {"approved", "rejected", "deferred"}
 _TASK_STATUSES = _ACTIVE_STATUSES | _DECISIONS | {"superseded"}
+_METADATA_TRIAGE = {
+    "missing_publication_year": {
+        "risk_level": "low",
+        "required_reviewer_role": "data_curator",
+        "medical_review_required": False,
+    },
+    "missing_source_url": {
+        "risk_level": "medium",
+        "required_reviewer_role": "evidence_curator",
+        "medical_review_required": False,
+    },
+    "missing_identifiers": {
+        "risk_level": "medium",
+        "required_reviewer_role": "evidence_curator",
+        "medical_review_required": False,
+    },
+}
+_DUPLICATE_TRIAGE = {
+    "risk_level": "medium",
+    "required_reviewer_role": "medical_reviewer",
+    "medical_review_required": True,
+}
 
 
 class ReviewQueueError(ValueError):
@@ -50,6 +72,7 @@ def review_signals(records: list[SourceRecord]) -> list[ReviewSignal]:
             "source_record_id": item.source_record_id,
             "title": item.title,
             "reason": item.reason,
+            "triage": _METADATA_TRIAGE[item.reason],
         }
         signals.append(
             ReviewSignal(
@@ -72,6 +95,7 @@ def review_signals(records: list[SourceRecord]) -> list[ReviewSignal]:
                     "kind": candidate.kind,
                     "confidence": candidate.confidence,
                     "score": candidate.score,
+                    "triage": _DUPLICATE_TRIAGE,
                 },
             )
         )
@@ -149,11 +173,19 @@ def list_review_events(session: Session, task_id: int) -> list[ReviewEventRow]:
     )
 
 
-def claim_task(session: Session, task_id: int, *, reviewer: str) -> ReviewTaskRow:
+def claim_task(
+    session: Session,
+    task_id: int,
+    *,
+    reviewer: str,
+    reviewer_role: str | None = None,
+) -> ReviewTaskRow:
     """Claim one open or deferred task for the named reviewer."""
 
     reviewer = _require_nonblank(reviewer, "reviewer")
     task = _task_or_error(session, task_id)
+    reviewer_role = _resolved_reviewer_role(task, reviewer_role)
+    _require_reviewer_role(task, reviewer_role)
     if task.status not in {"open", "deferred"}:
         raise ReviewQueueError(f"task {task_id} cannot be claimed from {task.status}")
     now = datetime.utcnow()
@@ -176,7 +208,13 @@ def claim_task(session: Session, task_id: int, *, reviewer: str) -> ReviewTaskRo
         session.refresh(task)
         raise ReviewQueueError(f"task {task_id} cannot be claimed from {task.status}")
     session.refresh(task)
-    _add_event(session, task, event_type="claimed", actor=reviewer)
+    _add_event(
+        session,
+        task,
+        event_type="claimed",
+        actor=reviewer,
+        payload={"reviewer_role": reviewer_role},
+    )
     session.flush()
     return task
 
@@ -186,6 +224,7 @@ def decide_task(
     task_id: int,
     *,
     reviewer: str,
+    reviewer_role: str | None = None,
     decision: str,
     reason: str | None = None,
 ) -> ReviewTaskRow:
@@ -200,6 +239,8 @@ def decide_task(
         reason = reason.strip() or None
 
     task = _task_or_error(session, task_id)
+    reviewer_role = _resolved_reviewer_role(task, reviewer_role)
+    _require_reviewer_role(task, reviewer_role)
     if task.status != "claimed":
         raise ReviewQueueError(f"task {task_id} is not claimed")
     if task.claimed_by != reviewer:
@@ -227,7 +268,14 @@ def decide_task(
             raise ReviewQueueError(f"task {task_id} is not claimed")
         raise ReviewQueueError(f"task {task_id} is claimed by another reviewer")
     session.refresh(task)
-    _add_event(session, task, event_type=decision, actor=reviewer, reason=reason)
+    _add_event(
+        session,
+        task,
+        event_type=decision,
+        actor=reviewer,
+        reason=reason,
+        payload={"reviewer_role": reviewer_role},
+    )
     session.flush()
     return task
 
@@ -235,12 +283,16 @@ def decide_task(
 def task_mapping(task: ReviewTaskRow) -> dict[str, object]:
     """Return a JSON-compatible, externally safe representation of a task."""
 
+    triage = _task_triage(task)
     return {
         "id": task.id,
         "fingerprint": task.fingerprint,
         "task_type": task.task_type,
         "status": task.status,
         "payload": task.payload,
+        "risk_level": triage["risk_level"],
+        "required_reviewer_role": triage["required_reviewer_role"],
+        "medical_review_required": triage["medical_review_required"],
         "claimed_by": task.claimed_by,
         "claimed_at": _isoformat(task.claimed_at),
         "resolved_at": _isoformat(task.resolved_at),
@@ -271,6 +323,7 @@ def _add_event(
     event_type: str,
     actor: str,
     reason: str | None = None,
+    payload: dict[str, object] | None = None,
 ) -> None:
     session.add(
         ReviewEventRow(
@@ -278,7 +331,7 @@ def _add_event(
             event_type=event_type,
             actor=actor,
             reason=reason,
-            payload={},
+            payload=payload or {},
         )
     )
 
@@ -300,6 +353,34 @@ def _require_status(status: str) -> None:
     if status not in _TASK_STATUSES:
         allowed = ", ".join(sorted(_TASK_STATUSES))
         raise ReviewQueueError(f"invalid status {status!r}; expected one of: {allowed}")
+
+
+def _task_triage(task: ReviewTaskRow) -> dict[str, object]:
+    """Read persisted triage, with a safe policy fallback for older databases."""
+
+    triage = task.payload.get("triage")
+    if isinstance(triage, dict):
+        return triage
+    if task.task_type == "duplicate_candidate":
+        return _DUPLICATE_TRIAGE
+    return _METADATA_TRIAGE["missing_source_url"]
+
+
+def _require_reviewer_role(task: ReviewTaskRow, reviewer_role: str) -> None:
+    required_role = _task_triage(task)["required_reviewer_role"]
+    if reviewer_role != required_role:
+        raise ReviewQueueError(
+            f"task {task.id} requires reviewer role {required_role}"
+        )
+
+
+def _resolved_reviewer_role(task: ReviewTaskRow, reviewer_role: str | None) -> str:
+    """Use task policy for backwards-compatible Python callers without a role."""
+
+    if reviewer_role is None:
+        return str(_task_triage(task)["required_reviewer_role"])
+    reviewer_role = _require_nonblank(reviewer_role, "reviewer_role")
+    return reviewer_role
 
 
 def _isoformat(value: datetime | None) -> str | None:

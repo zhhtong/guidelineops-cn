@@ -16,7 +16,9 @@ from guidelineops.review_queue import (
     decide_task,
     event_mapping,
     list_review_events,
+    review_signals,
     sync_review_tasks,
+    task_mapping,
 )
 
 
@@ -43,6 +45,93 @@ def test_sync_creates_one_task_per_risk_and_duplicate() -> None:
         assert (
             db_session.scalar(select(func.count()).select_from(ReviewEventRow)) == 7
         )
+
+
+def test_review_signals_assign_deterministic_governance_triage() -> None:
+    signals = review_signals(
+        [
+            SourceRecord(source="pubmed", source_record_id="1", title="COPD"),
+            SourceRecord(source="cnki", source_record_id="2", title="COPD"),
+        ]
+    )
+
+    metadata_signal = next(
+        signal
+        for signal in signals
+        if signal.fingerprint == "risk:pubmed:1:missing_source_url"
+    )
+    duplicate_signal = next(
+        signal for signal in signals if signal.task_type == "duplicate_candidate"
+    )
+
+    assert metadata_signal.payload["triage"] == {
+        "risk_level": "medium",
+        "required_reviewer_role": "evidence_curator",
+        "medical_review_required": False,
+    }
+    assert duplicate_signal.payload["triage"] == {
+        "risk_level": "medium",
+        "required_reviewer_role": "medical_reviewer",
+        "medical_review_required": True,
+    }
+
+
+def test_claim_and_decision_require_the_declared_reviewer_role() -> None:
+    with session() as db_session:
+        sync_review_tasks(
+            db_session,
+            [
+                SourceRecord(source="pubmed", source_record_id="1", title="COPD"),
+                SourceRecord(source="cnki", source_record_id="2", title="COPD"),
+            ],
+        )
+        task = db_session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "duplicate_candidate"
+            )
+        )
+        assert task is not None
+
+        with pytest.raises(
+            ReviewQueueError, match="requires reviewer role medical_reviewer"
+        ):
+            claim_task(
+                db_session,
+                task.id,
+                reviewer="Alice",
+                reviewer_role="evidence_curator",
+            )
+
+        claim_task(
+            db_session,
+            task.id,
+            reviewer="Dr. Chen",
+            reviewer_role="medical_reviewer",
+        )
+        with pytest.raises(
+            ReviewQueueError, match="requires reviewer role medical_reviewer"
+        ):
+            decide_task(
+                db_session,
+                task.id,
+                reviewer="Dr. Chen",
+                reviewer_role="evidence_curator",
+                decision="approved",
+            )
+
+        decided = decide_task(
+            db_session,
+            task.id,
+            reviewer="Dr. Chen",
+            reviewer_role="medical_reviewer",
+            decision="approved",
+        )
+
+        assert task_mapping(decided)["medical_review_required"] is True
+        final_event = list_review_events(db_session, task.id)[-1]
+        assert event_mapping(final_event)["payload"] == {
+            "reviewer_role": "medical_reviewer"
+        }
 
 
 def test_sync_is_idempotent_and_supersedes_disappeared_active_signals() -> None:

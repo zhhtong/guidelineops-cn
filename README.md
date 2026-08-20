@@ -55,8 +55,8 @@ uv run guidelineops quality-report
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
-uv run guidelineops review-claim 12 --reviewer "Dr Li"
-uv run guidelineops review-reject 12 --reviewer "Dr Li" --reason "Not a formal guideline"
+uv run guidelineops review-claim 12 --reviewer "Dr Li" --role data_curator
+uv run guidelineops review-reject 12 --reviewer "Dr Li" --role data_curator --reason "Not a formal guideline"
 ```
 
 `discover` writes `data/guideline_candidates.csv`,
@@ -72,6 +72,10 @@ rejects records.
 `review-sync` turns quality risks and non-destructive duplicate candidates into
 idempotent SQLite tasks. Review actions are append-only audit events; they never
 alter source metadata, automatically merge records, or make clinical decisions.
+Tasks carry a deterministic risk level, required reviewer role, and medical-review
+flag. CLI actions must declare `--role`; the queue rejects a role that does not
+match the task and records the declared role in the audit trail. A declared role
+is workflow routing, not credential or licensure verification.
 
 ## Source and copyright boundary
 

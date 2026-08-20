@@ -258,11 +258,19 @@ def review_events(
 def review_claim(
     task_id: int = typer.Argument(..., help="Review task ID."),
     reviewer: str = typer.Option(..., help="Named reviewer claiming the task."),
+    reviewer_role: str = typer.Option(
+        ..., "--role", help="Declared role for this review action."
+    ),
 ) -> None:
     """Claim an open or deferred task for a reviewer."""
 
     _run_review_mutation(
-        lambda session: claim_task(session, task_id, reviewer=reviewer)
+        lambda session: claim_task(
+            session,
+            task_id,
+            reviewer=reviewer,
+            reviewer_role=reviewer_role,
+        )
     )
 
 
@@ -270,6 +278,9 @@ def review_claim(
 def review_approve(
     task_id: int = typer.Argument(..., help="Review task ID."),
     reviewer: str = typer.Option(..., help="Named reviewer making the decision."),
+    reviewer_role: str = typer.Option(
+        ..., "--role", help="Declared role for this review action."
+    ),
     note: str | None = typer.Option(None, help="Optional review note."),
 ) -> None:
     """Approve a task claimed by the named reviewer."""
@@ -279,6 +290,7 @@ def review_approve(
             session,
             task_id,
             reviewer=reviewer,
+            reviewer_role=reviewer_role,
             decision="approved",
             reason=note,
         )
@@ -289,6 +301,9 @@ def review_approve(
 def review_reject(
     task_id: int = typer.Argument(..., help="Review task ID."),
     reviewer: str = typer.Option(..., help="Named reviewer making the decision."),
+    reviewer_role: str = typer.Option(
+        ..., "--role", help="Declared role for this review action."
+    ),
     reason: str = typer.Option(..., help="Required reason for rejection."),
 ) -> None:
     """Reject a task claimed by the named reviewer."""
@@ -298,6 +313,7 @@ def review_reject(
             session,
             task_id,
             reviewer=reviewer,
+            reviewer_role=reviewer_role,
             decision="rejected",
             reason=reason,
         )
@@ -308,6 +324,9 @@ def review_reject(
 def review_defer(
     task_id: int = typer.Argument(..., help="Review task ID."),
     reviewer: str = typer.Option(..., help="Named reviewer making the decision."),
+    reviewer_role: str = typer.Option(
+        ..., "--role", help="Declared role for this review action."
+    ),
     reason: str = typer.Option(..., help="Required reason for deferral."),
 ) -> None:
     """Defer a task claimed by the named reviewer."""
@@ -317,6 +336,7 @@ def review_defer(
             session,
             task_id,
             reviewer=reviewer,
+            reviewer_role=reviewer_role,
             decision="deferred",
             reason=reason,
         )
