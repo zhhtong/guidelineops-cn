@@ -5,13 +5,14 @@ discovering Chinese clinical guidelines, expert consensuses, and related
 normative documents. It is designed for research and education, not for
 diagnosis, treatment, prescribing, or clinical decision support.
 
-## What works in v0.1
+## What works in v0.3
 
 - PubMed E-utilities: ESearch, EFetch, XML parsing, rate limiting, retries, and raw snapshots.
 - Crossref REST API: title search, DOI lookup, publication/license metadata.
 - CNKI and Wanfang: offline import of user-exported CSV metadata only.
 - Pydantic records, SQLite persistence, conservative DOI/PMID deduplication, and review-only title candidates.
 - UTF-8 CSV/JSONL exports and a PubMed-first `discover` command.
+- Deterministic metadata quality reports plus an auditable human review queue.
 
 ```mermaid
 flowchart LR
@@ -48,6 +49,10 @@ uv run guidelineops import-file --source cnki exports/cnki.csv
 uv run guidelineops import-file --source wanfang exports/wanfang.csv
 uv run guidelineops discover --disease "COPD guideline" --since 2015 --limit 20
 uv run guidelineops quality-report
+uv run guidelineops review-sync
+uv run guidelineops review-list --status open
+uv run guidelineops review-claim 12 --reviewer "Dr Li"
+uv run guidelineops review-reject 12 --reviewer "Dr Li" --reason "Not a formal guideline"
 ```
 
 `discover` writes `data/guideline_candidates.csv`,
@@ -59,6 +64,10 @@ signals to `data/quality_report.json` and `data/quality_report.md` (or the
 configured `DATA_DIR`). The report is for research and education only: it does
 not provide clinical recommendations and never automatically approves or
 rejects records.
+
+`review-sync` turns quality risks and non-destructive duplicate candidates into
+idempotent SQLite tasks. Review actions are append-only audit events; they never
+alter source metadata, automatically merge records, or make clinical decisions.
 
 ## Source and copyright boundary
 

@@ -101,3 +101,17 @@ def test_claim_and_reject_require_owner_and_reason() -> None:
         assert task.status == "rejected"
         assert task.claimed_by == "李医生"
         assert task.resolved_at is not None
+
+
+def test_review_sync_does_not_change_source_record_data() -> None:
+    record = SourceRecord(
+        source="pubmed",
+        source_record_id="1",
+        title="COPD",
+    )
+    before = record.model_dump(mode="json")
+
+    with session() as db_session:
+        sync_review_tasks(db_session, [record])
+
+    assert record.model_dump(mode="json") == before
