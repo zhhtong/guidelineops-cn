@@ -95,6 +95,51 @@ def test_review_cli_requires_declared_reviewer_role(
     assert "--role" in result.output
 
 
+def test_review_cli_enforces_configured_reviewer_registry(
+    monkeypatch, tmp_path: Path
+) -> None:
+    database_path = tmp_path / "review.db"
+    registry_path = tmp_path / "reviewers.json"
+    registry_path.write_text(
+        '{"reviewers": [{"id": "alice", "roles": ["data_curator"]}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    monkeypatch.setenv("REVIEWER_REGISTRY_PATH", str(registry_path))
+    _seed_source_record(database_path)
+    runner = CliRunner()
+    runner.invoke(app, ["review-sync"])
+    listed = runner.invoke(app, ["review-list"])
+    task_id = json.loads(listed.output.splitlines()[0])["id"]
+
+    denied = runner.invoke(
+        app,
+        [
+            "review-claim",
+            str(task_id),
+            "--reviewer",
+            "mallory",
+            "--role",
+            "data_curator",
+        ],
+    )
+    allowed = runner.invoke(
+        app,
+        [
+            "review-claim",
+            str(task_id),
+            "--reviewer",
+            "alice",
+            "--role",
+            "data_curator",
+        ],
+    )
+
+    assert denied.exit_code == 2
+    assert "not authorized" in denied.output
+    assert allowed.exit_code == 0, allowed.output
+
+
 def test_review_cli_reject_requires_reason(monkeypatch, tmp_path: Path) -> None:
     database_path = tmp_path / "review.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")

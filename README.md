@@ -77,6 +77,12 @@ flag. CLI actions must declare `--role`; the queue rejects a role that does not
 match the task and records the declared role in the audit trail. A declared role
 is workflow routing, not credential or licensure verification.
 
+Deployments can set `REVIEWER_REGISTRY_PATH` to a local JSON allow-list (start
+from [`reviewers.example.json`](reviewers.example.json)). When configured, the
+CLI permits review actions only when the declared reviewer ID has the declared
+role. Keep the registry free of passwords and unnecessary personal information;
+it is operational authorization, not identity or professional credential proof.
+
 ## Source and copyright boundary
 
 The project stores metadata and links, not paywalled CNKI/Wanfang full text.

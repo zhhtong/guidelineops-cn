@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     wanfang_app_secret: str | None = None
     database_url: str = "sqlite:///./data/guidelineops.db"
     data_dir: Path = Path("data")
+    reviewer_registry_path: Path | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

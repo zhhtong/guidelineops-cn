@@ -1,0 +1,16 @@
+{
+  "reviewers": [
+    {
+      "id": "data-curator-example",
+      "roles": ["data_curator"]
+    },
+    {
+      "id": "evidence-curator-example",
+      "roles": ["evidence_curator"]
+    },
+    {
+      "id": "medical-reviewer-example",
+      "roles": ["medical_reviewer"]
+    }
+  ]
+}

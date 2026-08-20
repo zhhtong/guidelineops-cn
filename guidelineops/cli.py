@@ -35,6 +35,7 @@ from .review_queue import (
     sync_review_tasks,
     task_mapping,
 )
+from .reviewers import ReviewerRegistryError, authorize_reviewer
 from .sources.base import AdapterConfigurationError
 from .sources.cnki_import import import_cnki_csv
 from .sources.crossref import CrossrefAdapter
@@ -270,7 +271,9 @@ def review_claim(
             task_id,
             reviewer=reviewer,
             reviewer_role=reviewer_role,
-        )
+        ),
+        reviewer=reviewer,
+        reviewer_role=reviewer_role,
     )
 
 
@@ -293,7 +296,9 @@ def review_approve(
             reviewer_role=reviewer_role,
             decision="approved",
             reason=note,
-        )
+        ),
+        reviewer=reviewer,
+        reviewer_role=reviewer_role,
     )
 
 
@@ -316,7 +321,9 @@ def review_reject(
             reviewer_role=reviewer_role,
             decision="rejected",
             reason=reason,
-        )
+        ),
+        reviewer=reviewer,
+        reviewer_role=reviewer_role,
     )
 
 
@@ -339,14 +346,25 @@ def review_defer(
             reviewer_role=reviewer_role,
             decision="deferred",
             reason=reason,
-        )
+        ),
+        reviewer=reviewer,
+        reviewer_role=reviewer_role,
     )
 
 
-def _run_review_mutation(operation) -> None:
+def _run_review_mutation(operation, *, reviewer: str, reviewer_role: str) -> None:
     """Commit a successful review action or roll back a rejected transition."""
 
     settings = Settings()
+    try:
+        authorize_reviewer(
+            settings.reviewer_registry_path,
+            reviewer=reviewer,
+            reviewer_role=reviewer_role,
+        )
+    except ReviewerRegistryError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
     engine = _database_engine(settings)
     with Session(engine) as session:
         try:
