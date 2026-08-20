@@ -1,6 +1,8 @@
 # GuidelineOps-CN
 
-GuidelineOps-CN is a reproducible, provenance-first metadata pipeline for
+[![CI](actions/workflows/ci.yml/badge.svg)](actions/workflows/ci.yml)
+
+GuidelineOps-CN v0.3.0 is a reproducible, provenance-first metadata pipeline for
 discovering Chinese clinical guidelines, expert consensuses, and related
 normative documents. It is designed for research and education, not for
 diagnosis, treatment, prescribing, or clinical decision support.

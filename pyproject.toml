@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "guidelineops-cn"
-version = "0.1.0"
+version = "0.3.0"
 description = "Evidence-oriented guideline operations for research and education."
 readme = "README.md"
 requires-python = ">=3.11"
