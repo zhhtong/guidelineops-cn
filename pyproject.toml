@@ -7,6 +7,20 @@ name = "guidelineops-cn"
 version = "0.3.0"
 description = "Evidence-oriented guideline operations for research and education."
 readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "GuidelineOps-CN contributors" }]
+keywords = ["clinical-guidelines", "evidence", "medicine", "knowledge-base", "metadata"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
 requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12,<1.0",
