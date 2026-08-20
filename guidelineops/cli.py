@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import typer
 from sqlalchemy import func, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from .config import Settings
@@ -159,7 +162,9 @@ def quality_report() -> None:
     settings = Settings()
     engine = _database_engine(settings)
     with Session(engine) as session:
-        rows = list(session.scalars(select(SourceRecordRow)))
+        rows = list(
+            session.scalars(select(SourceRecordRow).order_by(SourceRecordRow.id))
+        )
         canonical_count = session.scalar(
             select(func.count()).select_from(CanonicalGuidelineRow)
         )
@@ -173,12 +178,122 @@ def quality_report() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "quality_report.json"
     markdown_path = output_dir / "quality_report.md"
-    json_path.write_text(report_json(report), encoding="utf-8")
-    markdown_path.write_text(render_markdown(report), encoding="utf-8")
+    _atomic_write_reports(
+        json_path,
+        report_json(report),
+        markdown_path,
+        render_markdown(report),
+    )
 
     typer.echo(f"Records: {report.total_records}")
     typer.echo(f"JSON: {json_path}")
     typer.echo(f"Markdown: {markdown_path}")
+
+
+def _write_temp_text(path: Path, content: str, *, prefix: str) -> Path:
+    """Write UTF-8 text to a durable same-directory temporary file."""
+
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=prefix,
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        return temporary_path
+    except BaseException:
+        if temporary_path is not None:
+            _remove_temp_file(temporary_path)
+        raise
+
+
+def _write_temp_bytes(path: Path, content: bytes, *, prefix: str) -> Path:
+    """Write bytes to a durable same-directory temporary file."""
+
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=prefix,
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        return temporary_path
+    except BaseException:
+        if temporary_path is not None:
+            _remove_temp_file(temporary_path)
+        raise
+
+
+def _remove_temp_file(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
+def _atomic_write_reports(
+    json_path: Path,
+    json_content: str,
+    markdown_path: Path,
+    markdown_content: str,
+) -> None:
+    """Prepare both reports before replacing either final artifact."""
+
+    targets = (
+        (json_path, json_content),
+        (markdown_path, markdown_content),
+    )
+    if any(path.is_dir() for path, _ in targets):
+        raise IsADirectoryError("quality report output path is a directory")
+
+    temporary_paths: list[Path] = []
+    backup_paths: dict[Path, Path] = {}
+    replaced_targets: list[Path] = []
+    try:
+        for path, content in targets:
+            temporary_paths.append(
+                _write_temp_text(path, content, prefix=f".{path.name}.")
+            )
+        for path, _ in targets:
+            if path.exists():
+                backup_paths[path] = _write_temp_bytes(
+                    path,
+                    path.read_bytes(),
+                    prefix=f".{path.name}.backup.",
+                )
+
+        for (path, _), temporary_path in zip(targets, temporary_paths):
+            replaced_targets.append(path)
+            os.replace(temporary_path, path)
+    except BaseException:
+        for path in reversed(replaced_targets):
+            backup_path = backup_paths.get(path)
+            if backup_path is None:
+                _remove_temp_file(path)
+            else:
+                try:
+                    os.replace(backup_path, path)
+                except OSError:
+                    pass
+        raise
+    finally:
+        for temporary_path in temporary_paths:
+            _remove_temp_file(temporary_path)
+        for backup_path in backup_paths.values():
+            _remove_temp_file(backup_path)
 
 
 async def _discover_records(
@@ -196,9 +311,12 @@ async def _discover_records(
 
 
 def _database_engine(settings: Settings):
-    database_path = Path(settings.database_url.removeprefix("sqlite:///"))
-    if database_path.name != ":memory:":
-        database_path.parent.mkdir(parents=True, exist_ok=True)
+    database_url = make_url(settings.database_url)
+    if database_url.get_backend_name() == "sqlite":
+        database_name = database_url.database
+        if database_name and database_name != ":memory:":
+            database_path = Path(database_name)
+            database_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(settings.database_url)
     init_database(engine)
     return engine
