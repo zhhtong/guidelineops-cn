@@ -25,6 +25,14 @@ from .dedup import group_records
 from .export import export_records
 from .models import SourceRecord
 from .quality import build_quality_report, render_markdown, report_json
+from .review_queue import (
+    ReviewQueueError,
+    claim_task,
+    decide_task,
+    list_review_tasks,
+    sync_review_tasks,
+    task_mapping,
+)
 from .sources.base import AdapterConfigurationError
 from .sources.cnki_import import import_cnki_csv
 from .sources.crossref import CrossrefAdapter
@@ -188,6 +196,134 @@ def quality_report() -> None:
     typer.echo(f"Records: {report.total_records}")
     typer.echo(f"JSON: {json_path}")
     typer.echo(f"Markdown: {markdown_path}")
+
+
+@app.command("review-sync")
+def review_sync() -> None:
+    """Synchronize metadata risks and duplicate candidates into review tasks."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        records = [
+            SourceRecord.model_validate(row.record_data)
+            for row in session.scalars(
+                select(SourceRecordRow).order_by(SourceRecordRow.id)
+            )
+        ]
+        result = sync_review_tasks(session, records)
+        session.commit()
+    typer.echo(f"Created: {result.created}")
+    typer.echo(f"Refreshed: {result.refreshed}")
+    typer.echo(f"Superseded: {result.superseded}")
+
+
+@app.command("review-list")
+def review_list(
+    status: str | None = typer.Option(None, help="Optional review-task status."),
+) -> None:
+    """Print deterministic JSON Lines for current review tasks."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        try:
+            tasks = list_review_tasks(session, status=status)
+        except ReviewQueueError as error:
+            _exit_review_error(session, error)
+        for task in tasks:
+            typer.echo(json.dumps(task_mapping(task), ensure_ascii=False))
+
+
+@app.command("review-claim")
+def review_claim(
+    task_id: int = typer.Argument(..., help="Review task ID."),
+    reviewer: str = typer.Option(..., help="Named reviewer claiming the task."),
+) -> None:
+    """Claim an open or deferred task for a reviewer."""
+
+    _run_review_mutation(
+        lambda session: claim_task(session, task_id, reviewer=reviewer)
+    )
+
+
+@app.command("review-approve")
+def review_approve(
+    task_id: int = typer.Argument(..., help="Review task ID."),
+    reviewer: str = typer.Option(..., help="Named reviewer making the decision."),
+    note: str | None = typer.Option(None, help="Optional review note."),
+) -> None:
+    """Approve a task claimed by the named reviewer."""
+
+    _run_review_mutation(
+        lambda session: decide_task(
+            session,
+            task_id,
+            reviewer=reviewer,
+            decision="approved",
+            reason=note,
+        )
+    )
+
+
+@app.command("review-reject")
+def review_reject(
+    task_id: int = typer.Argument(..., help="Review task ID."),
+    reviewer: str = typer.Option(..., help="Named reviewer making the decision."),
+    reason: str = typer.Option(..., help="Required reason for rejection."),
+) -> None:
+    """Reject a task claimed by the named reviewer."""
+
+    _run_review_mutation(
+        lambda session: decide_task(
+            session,
+            task_id,
+            reviewer=reviewer,
+            decision="rejected",
+            reason=reason,
+        )
+    )
+
+
+@app.command("review-defer")
+def review_defer(
+    task_id: int = typer.Argument(..., help="Review task ID."),
+    reviewer: str = typer.Option(..., help="Named reviewer making the decision."),
+    reason: str = typer.Option(..., help="Required reason for deferral."),
+) -> None:
+    """Defer a task claimed by the named reviewer."""
+
+    _run_review_mutation(
+        lambda session: decide_task(
+            session,
+            task_id,
+            reviewer=reviewer,
+            decision="deferred",
+            reason=reason,
+        )
+    )
+
+
+def _run_review_mutation(operation) -> None:
+    """Commit a successful review action or roll back a rejected transition."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        try:
+            task = operation(session)
+            session.commit()
+        except ReviewQueueError as error:
+            _exit_review_error(session, error)
+        typer.echo(json.dumps(task_mapping(task), ensure_ascii=False))
+
+
+def _exit_review_error(session: Session, error: ReviewQueueError) -> None:
+    """Roll back a rejected review transition and exit consistently."""
+
+    session.rollback()
+    typer.echo(str(error), err=True)
+    raise typer.Exit(code=2) from error
 
 
 def _write_temp_text(path: Path, content: str, *, prefix: str) -> Path:
