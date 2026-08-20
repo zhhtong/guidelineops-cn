@@ -1,11 +1,15 @@
 from datetime import datetime
 
+import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from guidelineops.database import (
     CanonicalGuidelineRow,
     GuidelineSourceLinkRow,
     IngestionRunRow,
+    ReviewEventRow,
+    ReviewTaskRow,
     SourceRecordRow,
     create_session_factory,
     init_database,
@@ -87,3 +91,45 @@ def test_ingestion_run_is_persisted() -> None:
         session.add(run)
         session.commit()
         assert session.scalar(select(func.count()).select_from(IngestionRunRow)) == 1
+
+
+def test_review_task_fingerprint_is_unique() -> None:
+    session_factory = create_session_factory("sqlite+pysqlite:///:memory:")
+    init_database(session_factory.kw["bind"])
+    with session_factory() as session:
+        session.add_all(
+            [
+                ReviewTaskRow(
+                    fingerprint="risk:pubmed:1:missing_source_url",
+                    task_type="metadata_risk",
+                    status="open",
+                    payload={},
+                ),
+                ReviewTaskRow(
+                    fingerprint="risk:pubmed:1:missing_source_url",
+                    task_type="metadata_risk",
+                    status="open",
+                    payload={},
+                ),
+            ]
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_review_event_links_to_task() -> None:
+    session_factory = create_session_factory("sqlite+pysqlite:///:memory:")
+    init_database(session_factory.kw["bind"])
+    with session_factory() as session:
+        task = ReviewTaskRow(
+            fingerprint="risk:pubmed:1:missing_source_url",
+            task_type="metadata_risk",
+            status="open",
+            payload={},
+        )
+        session.add(task)
+        session.flush()
+        session.add(ReviewEventRow(task=task, event_type="synced", actor="system"))
+        session.commit()
+
+        assert session.scalar(select(ReviewEventRow)).task_id == task.id

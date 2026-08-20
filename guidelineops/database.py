@@ -86,6 +86,50 @@ class IngestionRunRow(Base):
     )
 
 
+class ReviewTaskRow(Base):
+    """A current human-review task generated from a quality signal."""
+
+    __tablename__ = "review_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(
+        String(1024), unique=True, nullable=False
+    )
+    task_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    claimed_by: Mapped[str | None] = mapped_column(String(255))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    events: Mapped[list[ReviewEventRow]] = relationship(back_populates="task")
+
+
+class ReviewEventRow(Base):
+    """An immutable audit event for one review-task workflow action."""
+
+    __tablename__ = "review_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("review_tasks.id"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    task: Mapped[ReviewTaskRow] = relationship(back_populates="events")
+
+
 def create_engine(database_url: str = "sqlite+pysqlite:///guidelineops.db") -> Engine:
     """Create a SQLAlchemy 2 engine suitable for SQLite."""
 
