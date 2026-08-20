@@ -1,0 +1,252 @@
+"""Deterministic review-task synchronization and audited state transitions."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .database import ReviewEventRow, ReviewTaskRow
+from .models import SourceRecord
+from .quality import build_quality_report
+
+_ACTIVE_STATUSES = {"open", "claimed", "deferred"}
+_DECISIONS = {"approved", "rejected", "deferred"}
+_TASK_STATUSES = _ACTIVE_STATUSES | _DECISIONS | {"superseded"}
+
+
+class ReviewQueueError(ValueError):
+    """Raised when a review workflow action is not allowed."""
+
+
+@dataclass(frozen=True)
+class ReviewSignal:
+    """A quality signal normalized into one stable review task."""
+
+    fingerprint: str
+    task_type: str
+    payload: dict[str, object]
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    """Counts reported after an idempotent review-task synchronization."""
+
+    created: int
+    refreshed: int
+    superseded: int
+
+
+def review_signals(records: list[SourceRecord]) -> list[ReviewSignal]:
+    """Create deterministic task signals from existing quality rules."""
+
+    report = build_quality_report(records, canonical_records=0)
+    signals: list[ReviewSignal] = []
+    for item in report.risk_items:
+        payload = {
+            "source": item.source,
+            "source_record_id": item.source_record_id,
+            "title": item.title,
+            "reason": item.reason,
+        }
+        signals.append(
+            ReviewSignal(
+                fingerprint=f"risk:{item.source}:{item.source_record_id}:{item.reason}",
+                task_type="metadata_risk",
+                payload=payload,
+            )
+        )
+    for candidate in report.duplicate_candidates:
+        left, right = sorted(
+            (candidate.left_source_record_id, candidate.right_source_record_id)
+        )
+        signals.append(
+            ReviewSignal(
+                fingerprint=f"duplicate:{candidate.kind}:{left}:{right}",
+                task_type="duplicate_candidate",
+                payload={
+                    "left_source_record_id": left,
+                    "right_source_record_id": right,
+                    "kind": candidate.kind,
+                    "confidence": candidate.confidence,
+                    "score": candidate.score,
+                },
+            )
+        )
+    return signals
+
+
+def sync_review_tasks(session: Session, records: list[SourceRecord]) -> SyncResult:
+    """Create, refresh, or supersede tasks without changing source records."""
+
+    now = datetime.utcnow()
+    signals = review_signals(records)
+    signal_by_fingerprint = {signal.fingerprint: signal for signal in signals}
+    tasks = list(session.scalars(select(ReviewTaskRow).order_by(ReviewTaskRow.id)))
+    existing = {task.fingerprint: task for task in tasks}
+    created = 0
+    refreshed = 0
+    superseded = 0
+
+    for signal in signals:
+        task = existing.get(signal.fingerprint)
+        if task is None:
+            task = ReviewTaskRow(
+                fingerprint=signal.fingerprint,
+                task_type=signal.task_type,
+                status="open",
+                payload=signal.payload,
+                last_seen_at=now,
+            )
+            session.add(task)
+            session.flush()
+            _add_event(session, task, event_type="synced", actor="system")
+            created += 1
+        else:
+            task.payload = signal.payload
+            task.last_seen_at = now
+            task.updated_at = now
+            refreshed += 1
+
+    for task in tasks:
+        if (
+            task.fingerprint not in signal_by_fingerprint
+            and task.status in _ACTIVE_STATUSES
+        ):
+            task.status = "superseded"
+            task.updated_at = now
+            _add_event(session, task, event_type="superseded", actor="system")
+            superseded += 1
+
+    session.flush()
+    return SyncResult(created=created, refreshed=refreshed, superseded=superseded)
+
+
+def list_review_tasks(
+    session: Session, *, status: str | None = None
+) -> list[ReviewTaskRow]:
+    """Return tasks in stable ID order, optionally filtered by state."""
+
+    statement = select(ReviewTaskRow).order_by(ReviewTaskRow.id)
+    if status is not None:
+        _require_status(status)
+        statement = statement.where(ReviewTaskRow.status == status)
+    return list(session.scalars(statement))
+
+
+def claim_task(session: Session, task_id: int, *, reviewer: str) -> ReviewTaskRow:
+    """Claim one open or deferred task for the named reviewer."""
+
+    reviewer = _require_nonblank(reviewer, "reviewer")
+    task = _task_or_error(session, task_id)
+    if task.status not in {"open", "deferred"}:
+        raise ReviewQueueError(f"task {task_id} cannot be claimed from {task.status}")
+    now = datetime.utcnow()
+    task.status = "claimed"
+    task.claimed_by = reviewer
+    task.claimed_at = now
+    task.resolved_at = None
+    task.updated_at = now
+    _add_event(session, task, event_type="claimed", actor=reviewer)
+    session.flush()
+    return task
+
+
+def decide_task(
+    session: Session,
+    task_id: int,
+    *,
+    reviewer: str,
+    decision: str,
+    reason: str | None = None,
+) -> ReviewTaskRow:
+    """Record a reviewer-owned approval, rejection, or deferral."""
+
+    reviewer = _require_nonblank(reviewer, "reviewer")
+    if decision not in _DECISIONS:
+        raise ReviewQueueError(f"unsupported decision: {decision}")
+    if decision in {"rejected", "deferred"}:
+        reason = _require_nonblank(reason, "reason")
+    elif reason is not None:
+        reason = reason.strip() or None
+
+    task = _task_or_error(session, task_id)
+    if task.status != "claimed":
+        raise ReviewQueueError(f"task {task_id} is not claimed")
+    if task.claimed_by != reviewer:
+        raise ReviewQueueError(f"task {task_id} is claimed by another reviewer")
+
+    now = datetime.utcnow()
+    task.status = decision
+    task.updated_at = now
+    if decision == "deferred":
+        task.claimed_by = None
+        task.claimed_at = None
+        task.resolved_at = None
+    else:
+        task.resolved_at = now
+    _add_event(session, task, event_type=decision, actor=reviewer, reason=reason)
+    session.flush()
+    return task
+
+
+def task_mapping(task: ReviewTaskRow) -> dict[str, object]:
+    """Return a JSON-compatible, externally safe representation of a task."""
+
+    return {
+        "id": task.id,
+        "fingerprint": task.fingerprint,
+        "task_type": task.task_type,
+        "status": task.status,
+        "payload": task.payload,
+        "claimed_by": task.claimed_by,
+        "claimed_at": _isoformat(task.claimed_at),
+        "resolved_at": _isoformat(task.resolved_at),
+        "created_at": _isoformat(task.created_at),
+        "updated_at": _isoformat(task.updated_at),
+        "last_seen_at": _isoformat(task.last_seen_at),
+    }
+
+
+def _add_event(
+    session: Session,
+    task: ReviewTaskRow,
+    *,
+    event_type: str,
+    actor: str,
+    reason: str | None = None,
+) -> None:
+    session.add(
+        ReviewEventRow(
+            task=task,
+            event_type=event_type,
+            actor=actor,
+            reason=reason,
+            payload={},
+        )
+    )
+
+
+def _task_or_error(session: Session, task_id: int) -> ReviewTaskRow:
+    task = session.get(ReviewTaskRow, task_id)
+    if task is None:
+        raise ReviewQueueError(f"review task not found: {task_id}")
+    return task
+
+
+def _require_nonblank(value: str | None, field_name: str) -> str:
+    if value is None or not value.strip():
+        raise ReviewQueueError(f"{field_name} is required")
+    return value.strip()
+
+
+def _require_status(status: str) -> None:
+    if status not in _TASK_STATUSES:
+        allowed = ", ".join(sorted(_TASK_STATUSES))
+        raise ReviewQueueError(f"invalid status {status!r}; expected one of: {allowed}")
+
+
+def _isoformat(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
