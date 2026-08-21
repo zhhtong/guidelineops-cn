@@ -18,6 +18,7 @@ from .config import Settings
 from .database import (
     CanonicalGuidelineRow,
     KnowledgeUnitRow,
+    MedicationSafetyRuleRow,
     SourceRecordRow,
     create_engine,
     freeze_knowledge_unit,
@@ -26,12 +27,15 @@ from .database import (
     knowledge_unit_from_row,
     retract_knowledge_unit,
     submit_knowledge_unit,
+    submit_medication_safety_rule,
     upsert_knowledge_unit,
+    upsert_medication_safety_rule,
     upsert_source_record,
 )
 from .dedup import group_records
 from .export import export_records
 from .knowledge import KnowledgeUnit
+from .medication_safety import MedicationSafetyRule
 from .models import SourceRecord
 from .quality import build_quality_report, render_markdown, report_json
 from .review_queue import (
@@ -42,6 +46,7 @@ from .review_queue import (
     list_review_events,
     list_review_tasks,
     sync_knowledge_review_tasks,
+    sync_medication_safety_review_tasks,
     sync_review_tasks,
     task_mapping,
 )
@@ -350,6 +355,61 @@ def knowledge_freeze(
     typer.echo(json.dumps(payload, ensure_ascii=False))
 
 
+@app.command("medication-safety-import")
+def medication_safety_import(
+    file: Path = typer.Argument(..., exists=True, readable=True),
+) -> None:
+    """Validate and persist source-grounded medication safety JSON."""
+
+    rules = _load_medication_safety_rules(file)
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        try:
+            for rule in rules:
+                upsert_medication_safety_rule(session, rule)
+            session.commit()
+        except ValueError as error:
+            session.rollback()
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+    typer.echo(f"Imported medication safety rules: {len(rules)}")
+
+
+@app.command("medication-safety-list")
+def medication_safety_list() -> None:
+    """Print persisted medication safety rules as deterministic JSON Lines."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        rows = session.scalars(
+            select(MedicationSafetyRuleRow).order_by(MedicationSafetyRuleRow.rule_id)
+        )
+        for row in rows:
+            typer.echo(json.dumps(_medication_safety_mapping(row), ensure_ascii=False))
+
+
+@app.command("medication-safety-submit")
+def medication_safety_submit(
+    rule_id: str = typer.Argument(..., help="Stable medication safety-rule ID."),
+) -> None:
+    """Submit a medication safety statement for independent medical review."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        try:
+            row = submit_medication_safety_rule(session, rule_id)
+            payload = _medication_safety_mapping(row)
+            session.commit()
+        except ValueError as error:
+            session.rollback()
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+    typer.echo(json.dumps(payload, ensure_ascii=False))
+
+
 @app.command("review-sync")
 def review_sync() -> None:
     """Synchronize metadata risks and duplicate candidates into review tasks."""
@@ -365,10 +425,18 @@ def review_sync() -> None:
         ]
         result = sync_review_tasks(session, records)
         knowledge_result = sync_knowledge_review_tasks(session)
+        medication_result = sync_medication_safety_review_tasks(session)
         session.commit()
-    typer.echo(f"Created: {result.created + knowledge_result.created}")
-    typer.echo(f"Refreshed: {result.refreshed + knowledge_result.refreshed}")
-    typer.echo(f"Superseded: {result.superseded + knowledge_result.superseded}")
+    created = result.created + knowledge_result.created + medication_result.created
+    refreshed = (
+        result.refreshed + knowledge_result.refreshed + medication_result.refreshed
+    )
+    superseded = (
+        result.superseded + knowledge_result.superseded + medication_result.superseded
+    )
+    typer.echo(f"Created: {created}")
+    typer.echo(f"Refreshed: {refreshed}")
+    typer.echo(f"Superseded: {superseded}")
 
 
 @app.command("review-list")
@@ -569,6 +637,50 @@ def _load_knowledge_units(file: Path) -> list[KnowledgeUnit]:
             typer.echo(f"Invalid knowledge unit {index}: {error}", err=True)
             raise typer.Exit(code=2) from error
     return units
+
+
+def _load_medication_safety_rules(file: Path) -> list[MedicationSafetyRule]:
+    """Load one medication safety object or a JSON array, without inference."""
+
+    try:
+        payload = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        typer.echo(f"Invalid medication safety JSON: {error}", err=True)
+        raise typer.Exit(code=2) from error
+    if isinstance(payload, dict):
+        items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        typer.echo("Medication safety JSON must be an object or an array", err=True)
+        raise typer.Exit(code=2)
+
+    rules: list[MedicationSafetyRule] = []
+    for index, item in enumerate(items, start=1):
+        try:
+            rules.append(MedicationSafetyRule.model_validate(item))
+        except (TypeError, ValidationError) as error:
+            typer.echo(f"Invalid medication safety rule {index}: {error}", err=True)
+            raise typer.Exit(code=2) from error
+    return rules
+
+
+def _medication_safety_mapping(row: MedicationSafetyRuleRow) -> dict[str, object]:
+    """Return a JSON-compatible public representation of a safety statement."""
+
+    return {
+        "rule_id": row.rule_id,
+        "source_unit_id": row.source_unit_id,
+        "medication_name": row.medication_name,
+        "category": row.category,
+        "risk_level": row.risk_level,
+        "statement": row.statement,
+        "source_locator": row.source_locator,
+        "version": row.version,
+        "safety_review_status": row.safety_review_status,
+        "affected_population": row.affected_population,
+        "related_medications": row.related_medications,
+    }
 
 
 def _exit_review_error(session: Session, error: ReviewQueueError) -> None:

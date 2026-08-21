@@ -45,6 +45,9 @@ uv run guidelineops knowledge-submit ku-copd-001
 uv run guidelineops knowledge-impact ku-copd-001
 uv run guidelineops knowledge-retract ku-copd-001 --reviewer "王医生" --role medical_lead --reason "来源已撤回"
 uv run guidelineops knowledge-freeze ku-copd-001 --reviewer "王医生" --role medical_lead
+uv run guidelineops medication-safety-import medication-safety.json
+uv run guidelineops medication-safety-submit med-safety-001
+uv run guidelineops medication-safety-list
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
@@ -65,6 +68,8 @@ uv run guidelineops review-reject 12 --reviewer "张医生" --role data_curator 
 `knowledge-impact` 可在安全处置前找出依赖某一知识单元的映射知识；`knowledge-retract` 只允许具名 `medical_lead` 执行，会记录不可修改的撤回原因、将知识单元标为 `retracted`，并返回需要进一步复核的受影响知识单元。
 
 `knowledge-freeze` 同样只允许 `medical_lead` 执行，且只有完成终审的知识单元才能冻结；冻结时会保存不可修改的内容快照和 SHA-256 校验值，后续修订不会覆盖已冻结版本。
+
+用药安全规则与普通知识单元分开保存，必须关联到已有来源知识单元，目前仅涵盖禁忌证、相互作用、特殊人群、器官功能受损、监测和停药等安全主题。系统拒绝保存剂量或针对个体患者的处方指令；提交后的规则同样需要 `medical_reviewer` 初审和独立 `medical_lead` 终审。
 
 `review-sync` 会把质量风险、重复候选和已提交知识单元同步为 SQLite 审核任务。任务会携带风险等级、所需审核角色和是否需要医学审核：缺失年份由 `data_curator` 处理，缺失链接/标识符由 `evidence_curator` 处理，重复候选和知识单元由 `medical_reviewer` 复核。命令行必须显式声明 `--role`，系统会拒绝与任务所需角色不符的操作，并将角色写入审计事件。该角色声明尚不是执照或机构资质验证。
 

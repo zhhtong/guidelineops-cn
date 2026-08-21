@@ -59,6 +59,9 @@ uv run guidelineops knowledge-submit ku-copd-001
 uv run guidelineops knowledge-impact ku-copd-001
 uv run guidelineops knowledge-retract ku-copd-001 --reviewer "Dr Wang" --role medical_lead --reason "Source withdrawn"
 uv run guidelineops knowledge-freeze ku-copd-001 --reviewer "Dr Wang" --role medical_lead
+uv run guidelineops medication-safety-import medication-safety.json
+uv run guidelineops medication-safety-submit med-safety-001
+uv run guidelineops medication-safety-list
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
@@ -93,6 +96,12 @@ reflected on the unit immediately.
 marks the unit `retracted`, and reports the dependent units needing review.
 `knowledge-freeze` requires the same role and creates an immutable, SHA-256
 protected snapshot only after the unit has completed final approval.
+
+Medication safety statements are stored separately from general knowledge units.
+They must cite an existing source unit and are limited to contraindications,
+interactions, special populations, organ impairment, monitoring, or withdrawal.
+The project rejects dosage and patient-specific prescribing instructions; submitted
+rules follow independent `medical_reviewer` and `medical_lead` review.
 
 `review-sync` turns quality risks and non-destructive duplicate candidates into
 idempotent SQLite tasks. Review actions are append-only audit events; they never

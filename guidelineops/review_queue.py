@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from .database import KnowledgeUnitRow, ReviewEventRow, ReviewTaskRow
+from .database import (
+    KnowledgeUnitRow,
+    MedicationSafetyRuleRow,
+    ReviewEventRow,
+    ReviewTaskRow,
+)
 from .models import SourceRecord
 from .quality import build_quality_report
 
@@ -230,6 +235,76 @@ def sync_knowledge_review_tasks(session: Session) -> SyncResult:
     return SyncResult(created=created, refreshed=refreshed, superseded=superseded)
 
 
+def sync_medication_safety_review_tasks(session: Session) -> SyncResult:
+    """Create high-risk medical review tasks for submitted safety statements."""
+
+    rules = list(
+        session.scalars(
+            select(MedicationSafetyRuleRow)
+            .where(MedicationSafetyRuleRow.safety_review_status == "pending")
+            .order_by(MedicationSafetyRuleRow.rule_id)
+        )
+    )
+    fingerprints = {f"medication:{rule.rule_id}:{rule.version}" for rule in rules}
+    tasks = list(
+        session.scalars(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "medication_safety_review"
+            )
+        )
+    )
+    existing = {task.fingerprint: task for task in tasks}
+    created = 0
+    refreshed = 0
+    superseded = 0
+    now = datetime.utcnow()
+
+    for rule in rules:
+        fingerprint = f"medication:{rule.rule_id}:{rule.version}"
+        payload = {
+            "rule_id": rule.rule_id,
+            "source_unit_id": rule.source_unit_id,
+            "medication_name": rule.medication_name,
+            "category": rule.category,
+            "risk_level": rule.risk_level,
+            "statement": rule.statement,
+            "version": rule.version,
+            "triage": {
+                "risk_level": "critical",
+                "required_reviewer_role": "medical_reviewer",
+                "medical_review_required": True,
+            },
+        }
+        task = existing.get(fingerprint)
+        if task is None:
+            task = ReviewTaskRow(
+                fingerprint=fingerprint,
+                task_type="medication_safety_review",
+                status="open",
+                payload=payload,
+                last_seen_at=now,
+            )
+            session.add(task)
+            session.flush()
+            _add_event(session, task, event_type="synced", actor="system")
+            created += 1
+        else:
+            task.payload = payload
+            task.last_seen_at = now
+            task.updated_at = now
+            refreshed += 1
+
+    for task in tasks:
+        if task.fingerprint not in fingerprints and task.status in _ACTIVE_STATUSES:
+            task.status = "superseded"
+            task.updated_at = now
+            _add_event(session, task, event_type="superseded", actor="system")
+            superseded += 1
+
+    session.flush()
+    return SyncResult(created=created, refreshed=refreshed, superseded=superseded)
+
+
 def list_review_tasks(
     session: Session, *, status: str | None = None
 ) -> list[ReviewTaskRow]:
@@ -352,8 +427,11 @@ def decide_task(
         raise ReviewQueueError(f"task {task_id} is claimed by another reviewer")
     session.refresh(task)
     _update_knowledge_review_status(session, task, decision)
+    _update_medication_safety_review_status(session, task, decision)
     if task.task_type == "knowledge_medical_review" and decision == "approved":
         _open_final_knowledge_review(session, task)
+    if task.task_type == "medication_safety_review" and decision == "approved":
+        _open_final_medication_safety_review(session, task)
     _add_event(
         session,
         task,
@@ -526,12 +604,80 @@ def _open_final_knowledge_review(session: Session, primary_task: ReviewTaskRow) 
 def _require_independent_reviewer(task: ReviewTaskRow, reviewer: str) -> None:
     """Do not let the primary reviewer perform the final high-risk review."""
 
-    if task.task_type != "knowledge_final_review":
+    if task.task_type not in {
+        "knowledge_final_review",
+        "medication_safety_final_review",
+    }:
         return
     if task.payload.get("primary_reviewer") == reviewer:
         raise ReviewQueueError(
             f"task {task.id} requires an independent reviewer from the primary review"
         )
+
+
+def _update_medication_safety_review_status(
+    session: Session, task: ReviewTaskRow, decision: str
+) -> None:
+    """Reflect terminal medication safety decisions without prescribing logic."""
+
+    if task.task_type not in {
+        "medication_safety_review",
+        "medication_safety_final_review",
+    } or decision == "deferred":
+        return
+    if task.task_type == "medication_safety_review" and decision == "approved":
+        return
+    rule_id = task.payload.get("rule_id")
+    if not isinstance(rule_id, str):
+        raise ReviewQueueError(f"medication task {task.id} has no rule_id")
+    rule = session.get(MedicationSafetyRuleRow, rule_id)
+    if rule is None:
+        raise ReviewQueueError(f"medication safety rule not found: {rule_id}")
+    rule.safety_review_status = decision
+
+
+def _open_final_medication_safety_review(
+    session: Session, primary_task: ReviewTaskRow
+) -> None:
+    """Open an independent medical-lead review after primary safety approval."""
+
+    rule_id = primary_task.payload.get("rule_id")
+    version = primary_task.payload.get("version")
+    if not isinstance(rule_id, str) or not isinstance(version, str):
+        raise ReviewQueueError(f"medication task {primary_task.id} lacks identity")
+    fingerprint = f"medication-final:{rule_id}:{version}"
+    final_task = session.scalar(
+        select(ReviewTaskRow).where(ReviewTaskRow.fingerprint == fingerprint)
+    )
+    payload = {
+        **primary_task.payload,
+        "primary_reviewer": primary_task.claimed_by,
+        "triage": {
+            "risk_level": "critical",
+            "required_reviewer_role": "medical_lead",
+            "medical_review_required": True,
+        },
+    }
+    if final_task is not None:
+        final_task.payload = payload
+        if final_task.status in _DECISIONS | {"superseded"}:
+            final_task.status = "open"
+            final_task.claimed_by = None
+            final_task.claimed_at = None
+            final_task.resolved_at = None
+            final_task.updated_at = datetime.utcnow()
+            _add_event(session, final_task, event_type="reopened", actor="system")
+        return
+    final_task = ReviewTaskRow(
+        fingerprint=fingerprint,
+        task_type="medication_safety_final_review",
+        status="open",
+        payload=payload,
+        last_seen_at=datetime.utcnow(),
+    )
+    session.add(final_task)
+    session.flush()
+    _add_event(session, final_task, event_type="opened_after_primary", actor="system")
 
 
 def _resolved_reviewer_role(task: ReviewTaskRow, reviewer_role: str | None) -> str:

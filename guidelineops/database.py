@@ -28,6 +28,7 @@ from sqlalchemy.orm import (
 )
 
 from .knowledge import KnowledgeUnit
+from .medication_safety import MedicationSafetyRule
 from .models import SourceRecord
 
 
@@ -209,6 +210,34 @@ class KnowledgeVersionRow(Base):
     snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     frozen_by: Mapped[str] = mapped_column(String(255), nullable=False)
     frozen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MedicationSafetyRuleRow(Base):
+    """A source-grounded medication safety statement, never a prescription."""
+
+    __tablename__ = "medication_safety_rules"
+
+    rule_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    source_unit_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_units.unit_id"), nullable=False
+    )
+    medication_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False)
+    statement: Mapped[str] = mapped_column(String, nullable=False)
+    source_locator: Mapped[str] = mapped_column(String, nullable=False)
+    version: Mapped[str] = mapped_column(String(128), nullable=False)
+    safety_review_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="draft"
+    )
+    affected_population: Mapped[str | None] = mapped_column(String)
+    related_medications: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 @event.listens_for(KnowledgeRetractionRow, "before_update")
@@ -434,6 +463,48 @@ def freeze_knowledge_unit(
     session.add(frozen)
     session.flush()
     return frozen
+
+
+def upsert_medication_safety_rule(
+    session: Session, rule: MedicationSafetyRule
+) -> MedicationSafetyRuleRow:
+    """Persist one validated medication safety statement by stable rule ID."""
+
+    if session.get(KnowledgeUnitRow, rule.source_unit_id) is None:
+        raise ValueError(f"source knowledge unit not found: {rule.source_unit_id}")
+    payload = rule.model_dump(mode="json")
+    row = session.get(MedicationSafetyRuleRow, rule.rule_id)
+    if row is None:
+        row = MedicationSafetyRuleRow(rule_id=rule.rule_id)
+        session.add(row)
+    for field in (
+        "source_unit_id",
+        "medication_name",
+        "category",
+        "risk_level",
+        "statement",
+        "source_locator",
+        "version",
+        "safety_review_status",
+        "affected_population",
+        "related_medications",
+    ):
+        setattr(row, field, payload[field])
+    session.flush()
+    return row
+
+
+def submit_medication_safety_rule(
+    session: Session, rule_id: str
+) -> MedicationSafetyRuleRow:
+    """Move one safety rule into the high-risk medical-review workflow."""
+
+    row = session.get(MedicationSafetyRuleRow, rule_id)
+    if row is None:
+        raise ValueError(f"medication safety rule not found: {rule_id}")
+    row.safety_review_status = "pending"
+    session.flush()
+    return row
 
 
 def _require_nonblank(value: str, field_name: str) -> str:
