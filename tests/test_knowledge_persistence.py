@@ -8,11 +8,15 @@ from typer.testing import CliRunner
 
 from guidelineops.cli import app
 from guidelineops.database import (
+    KnowledgeRetractionRow,
     KnowledgeUnitRow,
+    KnowledgeVersionRow,
     ReviewTaskRow,
     create_engine,
+    freeze_knowledge_unit,
     init_database,
     knowledge_unit_from_row,
+    retract_knowledge_unit,
     submit_knowledge_unit,
     upsert_knowledge_unit,
 )
@@ -228,3 +232,146 @@ def test_knowledge_approval_requires_independent_final_medical_review(
         session.refresh(unit_after_primary)
 
         assert unit_after_primary.medical_review_status == "approved"
+
+
+def test_retraction_records_reason_and_finds_dependent_knowledge(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'retraction.db'}")
+    init_database(engine)
+
+    with Session(engine) as session:
+        upsert_knowledge_unit(session, _unit())
+        dependent = KnowledgeUnit(
+            unit_id="ku-dependent",
+            source_record_id="cnki:1",
+            domain="traditional_chinese_medicine",
+            statement="痰热壅肺证相关知识。",
+            source_locator={"section": "证治"},
+            version="2024-1",
+            tcm_pattern="痰热壅肺证",
+            mapping_type="conditional",
+            mapped_unit_ids=["ku-1"],
+        )
+        upsert_knowledge_unit(session, dependent)
+        impact = retract_knowledge_unit(
+            session,
+            "ku-1",
+            reason="Source guideline was withdrawn",
+            actor="medical-lead-1",
+        )
+        impact_ids = [item.unit_id for item in impact]
+        session.commit()
+
+        root = session.get(KnowledgeUnitRow, "ku-1")
+        retraction = session.scalar(select(KnowledgeRetractionRow))
+        assert retraction is not None
+        retraction.reason = "tampered"
+        with pytest.raises(ValueError, match="immutable"):
+            session.commit()
+        session.rollback()
+        session.refresh(root)
+        session.refresh(retraction)
+        root_status = root.medical_review_status
+        retraction_reason = retraction.reason
+        retraction_actor = retraction.actor
+
+    assert root_status == "retracted"
+    assert retraction_reason == "Source guideline was withdrawn"
+    assert retraction_actor == "medical-lead-1"
+    assert impact_ids == ["ku-dependent"]
+
+
+def test_knowledge_retract_and_impact_cli(tmp_path: Path, monkeypatch) -> None:
+    database_path = tmp_path / "knowledge.db"
+    source = tmp_path / "knowledge.json"
+    source.write_text(json.dumps([_unit().model_dump(mode="json")]), encoding="utf-8")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    runner = CliRunner()
+    runner.invoke(app, ["knowledge-import", str(source)])
+
+    retracted = runner.invoke(
+        app,
+        [
+            "knowledge-retract",
+            "ku-1",
+            "--reviewer",
+            "Dr Wang",
+            "--role",
+            "medical_lead",
+            "--reason",
+            "Source withdrawn",
+        ],
+    )
+    impacted = runner.invoke(app, ["knowledge-impact", "ku-1"])
+
+    assert retracted.exit_code == 0, retracted.output
+    assert json.loads(retracted.output)["medical_review_status"] == "retracted"
+    assert impacted.exit_code == 0, impacted.output
+    assert json.loads(impacted.output) == []
+
+
+def test_approved_knowledge_unit_can_be_frozen_as_immutable_version(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'freeze.db'}")
+    init_database(engine)
+
+    with Session(engine) as session:
+        upsert_knowledge_unit(
+            session,
+            _unit().model_copy(
+                update={"medical_review_status": KnowledgeReviewStatus.approved}
+            ),
+        )
+        frozen = freeze_knowledge_unit(session, "ku-1", actor="Dr Wang")
+        session.commit()
+
+        version_row = session.scalar(select(KnowledgeVersionRow))
+        assert version_row is not None
+        version_row.snapshot = {**version_row.snapshot, "statement": "tampered"}
+        with pytest.raises(ValueError, match="immutable"):
+            session.commit()
+        session.rollback()
+        snapshot = frozen.snapshot
+
+    assert snapshot["unit_id"] == "ku-1"
+    assert snapshot["medical_review_status"] == "approved"
+
+
+def test_knowledge_freeze_cli_requires_medical_lead(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database_path = tmp_path / "knowledge.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")
+    engine = create_engine(f"sqlite:///{database_path}")
+    init_database(engine)
+    with Session(engine) as session:
+        upsert_knowledge_unit(
+            session,
+            _unit().model_copy(
+                update={"medical_review_status": KnowledgeReviewStatus.approved}
+            ),
+        )
+        session.commit()
+
+    denied = CliRunner().invoke(
+        app,
+        [
+            "knowledge-freeze",
+            "ku-1",
+            "--reviewer",
+            "Alice",
+            "--role",
+            "medical_reviewer",
+        ],
+    )
+    frozen = CliRunner().invoke(
+        app,
+        ["knowledge-freeze", "ku-1", "--reviewer", "Dr Wang", "--role", "medical_lead"],
+    )
+
+    assert denied.exit_code == 2
+    assert "medical_lead" in denied.output
+    assert frozen.exit_code == 0, frozen.output
+    assert json.loads(frozen.output)["snapshot_sha256"]

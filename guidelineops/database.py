@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from typing import Any
 
@@ -178,6 +180,73 @@ class KnowledgeUnitRow(Base):
     )
 
 
+class KnowledgeRetractionRow(Base):
+    """Append-only record explaining why a knowledge unit was withdrawn."""
+
+    __tablename__ = "knowledge_retractions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    unit_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_units.unit_id"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    actor: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class KnowledgeVersionRow(Base):
+    """An immutable, approved snapshot of one medical knowledge version."""
+
+    __tablename__ = "knowledge_versions"
+    __table_args__ = (UniqueConstraint("unit_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    unit_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_units.unit_id"), nullable=False
+    )
+    version: Mapped[str] = mapped_column(String(128), nullable=False)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    snapshot_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    frozen_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    frozen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+@event.listens_for(KnowledgeRetractionRow, "before_update")
+def _reject_knowledge_retraction_update(
+    mapper: object, connection: object, target: KnowledgeRetractionRow
+) -> None:
+    """Keep withdrawal evidence append-only at the ORM boundary."""
+
+    raise ValueError(f"knowledge retraction {target.id} is immutable")
+
+
+@event.listens_for(KnowledgeRetractionRow, "before_delete")
+def _reject_knowledge_retraction_delete(
+    mapper: object, connection: object, target: KnowledgeRetractionRow
+) -> None:
+    """Prevent deletion of recorded withdrawal evidence through ORM sessions."""
+
+    raise ValueError(f"knowledge retraction {target.id} is immutable")
+
+
+@event.listens_for(KnowledgeVersionRow, "before_update")
+def _reject_knowledge_version_update(
+    mapper: object, connection: object, target: KnowledgeVersionRow
+) -> None:
+    """Frozen knowledge snapshots cannot be altered through ORM sessions."""
+
+    raise ValueError(f"knowledge version {target.id} is immutable")
+
+
+@event.listens_for(KnowledgeVersionRow, "before_delete")
+def _reject_knowledge_version_delete(
+    mapper: object, connection: object, target: KnowledgeVersionRow
+) -> None:
+    """Frozen knowledge snapshots cannot be removed through ORM sessions."""
+
+    raise ValueError(f"knowledge version {target.id} is immutable")
+
+
 @event.listens_for(ReviewEventRow, "before_update")
 def _reject_review_event_update(
     mapper: object, connection: object, target: ReviewEventRow
@@ -293,6 +362,85 @@ def submit_knowledge_unit(session: Session, unit_id: str) -> KnowledgeUnitRow:
     row.medical_review_status = "pending"
     session.flush()
     return row
+
+
+def retract_knowledge_unit(
+    session: Session, unit_id: str, *, reason: str, actor: str
+) -> list[KnowledgeUnitRow]:
+    """Withdraw one unit and return every mapping-dependent unit it may affect."""
+
+    reason = _require_nonblank(reason, "retraction reason")
+    actor = _require_nonblank(actor, "retraction actor")
+    row = session.get(KnowledgeUnitRow, unit_id)
+    if row is None:
+        raise ValueError(f"knowledge unit not found: {unit_id}")
+    if row.medical_review_status == "retracted":
+        raise ValueError(f"knowledge unit is already retracted: {unit_id}")
+
+    row.medical_review_status = "retracted"
+    session.add(KnowledgeRetractionRow(unit_id=unit_id, reason=reason, actor=actor))
+    session.flush()
+    return knowledge_impact(session, unit_id)
+
+
+def knowledge_impact(session: Session, unit_id: str) -> list[KnowledgeUnitRow]:
+    """Find transitive units whose mapping depends on the given unit ID."""
+
+    rows = list(session.scalars(select(KnowledgeUnitRow)))
+    pending_ids = [unit_id]
+    seen_ids = {unit_id}
+    impacted: list[KnowledgeUnitRow] = []
+    while pending_ids:
+        dependency_id = pending_ids.pop(0)
+        for row in rows:
+            if row.unit_id in seen_ids or dependency_id not in row.mapped_unit_ids:
+                continue
+            seen_ids.add(row.unit_id)
+            pending_ids.append(row.unit_id)
+            impacted.append(row)
+    return sorted(impacted, key=lambda row: row.unit_id)
+
+
+def freeze_knowledge_unit(
+    session: Session, unit_id: str, *, actor: str
+) -> KnowledgeVersionRow:
+    """Create or return an immutable snapshot of an approved knowledge unit."""
+
+    actor = _require_nonblank(actor, "freezing actor")
+    row = session.get(KnowledgeUnitRow, unit_id)
+    if row is None:
+        raise ValueError(f"knowledge unit not found: {unit_id}")
+    if row.medical_review_status != "approved":
+        raise ValueError(f"knowledge unit must be approved before freezing: {unit_id}")
+    existing = session.scalar(
+        select(KnowledgeVersionRow).where(
+            KnowledgeVersionRow.unit_id == unit_id,
+            KnowledgeVersionRow.version == row.version,
+        )
+    )
+    if existing is not None:
+        return existing
+    snapshot = knowledge_unit_from_row(row).model_dump(mode="json")
+    snapshot_json = json.dumps(
+        snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    frozen = KnowledgeVersionRow(
+        unit_id=unit_id,
+        version=row.version,
+        snapshot=snapshot,
+        snapshot_sha256=hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest(),
+        frozen_by=actor,
+    )
+    session.add(frozen)
+    session.flush()
+    return frozen
+
+
+def _require_nonblank(value: str, field_name: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError(f"{field_name} is required")
+    return value
 
 
 def upsert_source_record(session: Session, record: SourceRecord) -> SourceRecordRow:

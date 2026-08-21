@@ -20,8 +20,11 @@ from .database import (
     KnowledgeUnitRow,
     SourceRecordRow,
     create_engine,
+    freeze_knowledge_unit,
     init_database,
+    knowledge_impact,
     knowledge_unit_from_row,
+    retract_knowledge_unit,
     submit_knowledge_unit,
     upsert_knowledge_unit,
     upsert_source_record,
@@ -271,6 +274,82 @@ def knowledge_submit(
     )
 
 
+@app.command("knowledge-retract")
+def knowledge_retract(
+    unit_id: str = typer.Argument(..., help="Stable knowledge-unit ID."),
+    reviewer: str = typer.Option(..., help="Medical lead withdrawing the unit."),
+    reviewer_role: str = typer.Option(..., "--role", help="Must be medical_lead."),
+    reason: str = typer.Option(..., help="Documented withdrawal reason."),
+) -> None:
+    """Withdraw a knowledge unit and report mapping-dependent units."""
+
+    settings = Settings()
+    _require_medical_lead(settings, reviewer=reviewer, reviewer_role=reviewer_role)
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        try:
+            impact = retract_knowledge_unit(
+                session, unit_id, reason=reason, actor=reviewer
+            )
+            payload = knowledge_unit_from_row(
+                session.get(KnowledgeUnitRow, unit_id)
+            ).model_dump(mode="json")
+            payload["impact_unit_ids"] = [row.unit_id for row in impact]
+            session.commit()
+        except ValueError as error:
+            session.rollback()
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+    typer.echo(json.dumps(payload, ensure_ascii=False))
+
+
+@app.command("knowledge-impact")
+def knowledge_impact_list(
+    unit_id: str = typer.Argument(..., help="Root knowledge-unit ID."),
+) -> None:
+    """List mapping-dependent knowledge units for withdrawal analysis."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        if session.get(KnowledgeUnitRow, unit_id) is None:
+            typer.echo(f"knowledge unit not found: {unit_id}", err=True)
+            raise typer.Exit(code=2)
+        payload = [
+            knowledge_unit_from_row(row).model_dump(mode="json")
+            for row in knowledge_impact(session, unit_id)
+        ]
+    typer.echo(json.dumps(payload, ensure_ascii=False))
+
+
+@app.command("knowledge-freeze")
+def knowledge_freeze(
+    unit_id: str = typer.Argument(..., help="Approved knowledge-unit ID."),
+    reviewer: str = typer.Option(..., help="Medical lead freezing the version."),
+    reviewer_role: str = typer.Option(..., "--role", help="Must be medical_lead."),
+) -> None:
+    """Freeze an approved knowledge unit as an immutable version snapshot."""
+
+    settings = Settings()
+    _require_medical_lead(settings, reviewer=reviewer, reviewer_role=reviewer_role)
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        try:
+            frozen = freeze_knowledge_unit(session, unit_id, actor=reviewer)
+            payload = {
+                "unit_id": frozen.unit_id,
+                "version": frozen.version,
+                "snapshot_sha256": frozen.snapshot_sha256,
+                "frozen_by": frozen.frozen_by,
+            }
+            session.commit()
+        except ValueError as error:
+            session.rollback()
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+    typer.echo(json.dumps(payload, ensure_ascii=False))
+
+
 @app.command("review-sync")
 def review_sync() -> None:
     """Synchronize metadata risks and duplicate candidates into review tasks."""
@@ -444,6 +523,25 @@ def _run_review_mutation(operation, *, reviewer: str, reviewer_role: str) -> Non
         except ReviewQueueError as error:
             _exit_review_error(session, error)
         typer.echo(json.dumps(task_mapping(task), ensure_ascii=False))
+
+
+def _require_medical_lead(
+    settings: Settings, *, reviewer: str, reviewer_role: str
+) -> None:
+    """Authorize the medical-lead role for a withdrawal safety action."""
+
+    if reviewer_role != "medical_lead":
+        typer.echo("knowledge retraction requires role medical_lead", err=True)
+        raise typer.Exit(code=2)
+    try:
+        authorize_reviewer(
+            settings.reviewer_registry_path,
+            reviewer=reviewer,
+            reviewer_role=reviewer_role,
+        )
+    except ReviewerRegistryError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
 
 
 def _load_knowledge_units(file: Path) -> list[KnowledgeUnit]:

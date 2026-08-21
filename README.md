@@ -56,6 +56,9 @@ uv run guidelineops knowledge-validate knowledge.json
 uv run guidelineops knowledge-import knowledge.json
 uv run guidelineops knowledge-list
 uv run guidelineops knowledge-submit ku-copd-001
+uv run guidelineops knowledge-impact ku-copd-001
+uv run guidelineops knowledge-retract ku-copd-001 --reviewer "Dr Wang" --role medical_lead --reason "Source withdrawn"
+uv run guidelineops knowledge-freeze ku-copd-001 --reviewer "Dr Wang" --role medical_lead
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
@@ -84,6 +87,12 @@ medical-review task. High-risk knowledge uses two named reviewers: a
 `medical_reviewer` completes primary review, then an independent `medical_lead`
 must complete final review before the unit becomes `approved`. A rejection is
 reflected on the unit immediately.
+
+`knowledge-impact` finds mapping-dependent units before a safety action.
+`knowledge-retract` requires a named `medical_lead`, records an immutable reason,
+marks the unit `retracted`, and reports the dependent units needing review.
+`knowledge-freeze` requires the same role and creates an immutable, SHA-256
+protected snapshot only after the unit has completed final approval.
 
 `review-sync` turns quality risks and non-destructive duplicate candidates into
 idempotent SQLite tasks. Review actions are append-only audit events; they never
