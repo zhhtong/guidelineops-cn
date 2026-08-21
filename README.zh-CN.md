@@ -39,6 +39,8 @@ uv run guidelineops import-file --source wanfang exports/wanfang.csv
 uv run guidelineops discover --disease "COPD guideline" --since 2015 --limit 20
 uv run guidelineops quality-report
 uv run guidelineops knowledge-validate knowledge.json
+uv run guidelineops knowledge-import knowledge.json
+uv run guidelineops knowledge-list
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
@@ -51,6 +53,8 @@ uv run guidelineops review-reject 12 --reviewer "张医生" --role data_curator 
 `quality-report` 从 SQLite 读取数据，生成 `data/quality_report.json` 和 `data/quality_report.md`（可通过 `DATA_DIR` 调整目录），报告元数据完整性、风险信号和重复候选。
 
 `knowledge-validate` 校验来源可追溯的知识单元 JSON（包括原文定位、证据等级、审核状态以及中西医映射字段），不执行临床推理或生成治疗建议。
+
+`knowledge-import` 会在校验后将知识单元幂等写入 SQLite；`knowledge-list` 以 JSON Lines 输出已持久化的知识单元，供复核或导出。
 
 `review-sync` 会把质量风险和重复候选同步为 SQLite 审核任务。任务会携带风险等级、所需审核角色和是否需要医学审核：缺失年份由 `data_curator` 处理，缺失链接/标识符由 `evidence_curator` 处理，重复候选由 `medical_reviewer` 复核。命令行必须显式声明 `--role`，系统会拒绝与任务所需角色不符的操作，并将角色写入审计事件。该角色声明尚不是执照或机构资质验证。
 

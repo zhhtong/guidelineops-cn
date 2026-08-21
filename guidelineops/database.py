@@ -25,6 +25,7 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
+from .knowledge import KnowledgeUnit
 from .models import SourceRecord
 
 
@@ -138,6 +139,45 @@ class ReviewEventRow(Base):
     task: Mapped[ReviewTaskRow] = relationship(back_populates="events")
 
 
+class KnowledgeUnitRow(Base):
+    """Persisted source-grounded knowledge unit awaiting medical governance."""
+
+    __tablename__ = "knowledge_units"
+
+    unit_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    source_record_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    domain: Mapped[str] = mapped_column(String(64), nullable=False)
+    statement: Mapped[str] = mapped_column(String, nullable=False)
+    source_locator: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    version: Mapped[str] = mapped_column(String(128), nullable=False)
+    population: Mapped[str | None] = mapped_column(String)
+    exclusions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    evidence_grade: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="not_rated"
+    )
+    recommendation_strength: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="not_applicable"
+    )
+    medical_review_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="draft"
+    )
+    conflict_of_interest: Mapped[str | None] = mapped_column(String)
+    tcm_pattern: Mapped[str | None] = mapped_column(String)
+    western_concept: Mapped[str | None] = mapped_column(String)
+    mapping_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="not_applicable"
+    )
+    mapped_unit_ids: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 @event.listens_for(ReviewEventRow, "before_update")
 def _reject_review_event_update(
     mapper: object, connection: object, target: ReviewEventRow
@@ -185,6 +225,61 @@ def init_database(engine: Engine) -> None:
     """Create all persistence tables if they do not exist."""
 
     Base.metadata.create_all(engine)
+
+
+def upsert_knowledge_unit(session: Session, unit: KnowledgeUnit) -> KnowledgeUnitRow:
+    """Persist one validated knowledge unit by stable unit ID."""
+
+    payload = unit.model_dump(mode="json")
+    row = session.get(KnowledgeUnitRow, unit.unit_id)
+    if row is None:
+        row = KnowledgeUnitRow(unit_id=unit.unit_id)
+        session.add(row)
+    for field in (
+        "source_record_id",
+        "domain",
+        "statement",
+        "source_locator",
+        "version",
+        "population",
+        "exclusions",
+        "evidence_grade",
+        "recommendation_strength",
+        "medical_review_status",
+        "conflict_of_interest",
+        "tcm_pattern",
+        "western_concept",
+        "mapping_type",
+        "mapped_unit_ids",
+    ):
+        setattr(row, field, payload[field])
+    session.flush()
+    return row
+
+
+def knowledge_unit_from_row(row: KnowledgeUnitRow) -> KnowledgeUnit:
+    """Revalidate and reconstruct a domain model from persisted fields."""
+
+    return KnowledgeUnit.model_validate(
+        {
+            "unit_id": row.unit_id,
+            "source_record_id": row.source_record_id,
+            "domain": row.domain,
+            "statement": row.statement,
+            "source_locator": row.source_locator,
+            "version": row.version,
+            "population": row.population,
+            "exclusions": row.exclusions,
+            "evidence_grade": row.evidence_grade,
+            "recommendation_strength": row.recommendation_strength,
+            "medical_review_status": row.medical_review_status,
+            "conflict_of_interest": row.conflict_of_interest,
+            "tcm_pattern": row.tcm_pattern,
+            "western_concept": row.western_concept,
+            "mapping_type": row.mapping_type,
+            "mapped_unit_ids": row.mapped_unit_ids,
+        }
+    )
 
 
 def upsert_source_record(session: Session, record: SourceRecord) -> SourceRecordRow:

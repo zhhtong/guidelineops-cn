@@ -17,9 +17,12 @@ from sqlalchemy.orm import Session
 from .config import Settings
 from .database import (
     CanonicalGuidelineRow,
+    KnowledgeUnitRow,
     SourceRecordRow,
     create_engine,
     init_database,
+    knowledge_unit_from_row,
+    upsert_knowledge_unit,
     upsert_source_record,
 )
 from .dedup import group_records
@@ -209,28 +212,39 @@ def knowledge_validate(
 ) -> None:
     """Validate source-grounded knowledge-unit JSON without clinical inference."""
 
-    try:
-        payload = json.loads(file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        typer.echo(f"Invalid knowledge JSON: {error}", err=True)
-        raise typer.Exit(code=2) from error
+    units = _load_knowledge_units(file)
+    typer.echo(f"Validated knowledge units: {len(units)}")
 
-    if isinstance(payload, dict):
-        items = [payload]
-    elif isinstance(payload, list):
-        items = payload
-    else:
-        typer.echo("Knowledge JSON must be an object or an array", err=True)
-        raise typer.Exit(code=2)
 
-    for index, item in enumerate(items, start=1):
-        try:
-            KnowledgeUnit.model_validate(item)
-        except (TypeError, ValidationError) as error:
-            typer.echo(f"Invalid knowledge unit {index}: {error}", err=True)
-            raise typer.Exit(code=2) from error
+@app.command("knowledge-import")
+def knowledge_import(
+    file: Path = typer.Argument(..., exists=True, readable=True),
+) -> None:
+    """Validate and idempotently persist knowledge-unit JSON."""
 
-    typer.echo(f"Validated knowledge units: {len(items)}")
+    units = _load_knowledge_units(file)
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        for unit in units:
+            upsert_knowledge_unit(session, unit)
+        session.commit()
+    typer.echo(f"Imported knowledge units: {len(units)}")
+
+
+@app.command("knowledge-list")
+def knowledge_list() -> None:
+    """Print persisted knowledge units as deterministic JSON Lines."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        rows = session.scalars(
+            select(KnowledgeUnitRow).order_by(KnowledgeUnitRow.unit_id)
+        )
+        for row in rows:
+            unit = knowledge_unit_from_row(row)
+            typer.echo(json.dumps(unit.model_dump(mode="json"), ensure_ascii=False))
 
 
 @app.command("review-sync")
@@ -405,6 +419,33 @@ def _run_review_mutation(operation, *, reviewer: str, reviewer_role: str) -> Non
         except ReviewQueueError as error:
             _exit_review_error(session, error)
         typer.echo(json.dumps(task_mapping(task), ensure_ascii=False))
+
+
+def _load_knowledge_units(file: Path) -> list[KnowledgeUnit]:
+    """Load and validate one knowledge-unit object or a JSON array."""
+
+    try:
+        payload = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        typer.echo(f"Invalid knowledge JSON: {error}", err=True)
+        raise typer.Exit(code=2) from error
+
+    if isinstance(payload, dict):
+        items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        typer.echo("Knowledge JSON must be an object or an array", err=True)
+        raise typer.Exit(code=2)
+
+    units: list[KnowledgeUnit] = []
+    for index, item in enumerate(items, start=1):
+        try:
+            units.append(KnowledgeUnit.model_validate(item))
+        except (TypeError, ValidationError) as error:
+            typer.echo(f"Invalid knowledge unit {index}: {error}", err=True)
+            raise typer.Exit(code=2) from error
+    return units
 
 
 def _exit_review_error(session: Session, error: ReviewQueueError) -> None:
