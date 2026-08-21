@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import typer
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
@@ -23,6 +24,7 @@ from .database import (
 )
 from .dedup import group_records
 from .export import export_records
+from .knowledge import KnowledgeUnit
 from .models import SourceRecord
 from .quality import build_quality_report, render_markdown, report_json
 from .review_queue import (
@@ -199,6 +201,36 @@ def quality_report() -> None:
     typer.echo(f"Records: {report.total_records}")
     typer.echo(f"JSON: {json_path}")
     typer.echo(f"Markdown: {markdown_path}")
+
+
+@app.command("knowledge-validate")
+def knowledge_validate(
+    file: Path = typer.Argument(..., exists=True, readable=True),
+) -> None:
+    """Validate source-grounded knowledge-unit JSON without clinical inference."""
+
+    try:
+        payload = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        typer.echo(f"Invalid knowledge JSON: {error}", err=True)
+        raise typer.Exit(code=2) from error
+
+    if isinstance(payload, dict):
+        items = [payload]
+    elif isinstance(payload, list):
+        items = payload
+    else:
+        typer.echo("Knowledge JSON must be an object or an array", err=True)
+        raise typer.Exit(code=2)
+
+    for index, item in enumerate(items, start=1):
+        try:
+            KnowledgeUnit.model_validate(item)
+        except (TypeError, ValidationError) as error:
+            typer.echo(f"Invalid knowledge unit {index}: {error}", err=True)
+            raise typer.Exit(code=2) from error
+
+    typer.echo(f"Validated knowledge units: {len(items)}")
 
 
 @app.command("review-sync")

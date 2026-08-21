@@ -52,6 +52,7 @@ uv run guidelineops import-file --source cnki exports/cnki.csv
 uv run guidelineops import-file --source wanfang exports/wanfang.csv
 uv run guidelineops discover --disease "COPD guideline" --since 2015 --limit 20
 uv run guidelineops quality-report
+uv run guidelineops knowledge-validate knowledge.json
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
@@ -68,6 +69,10 @@ signals to `data/quality_report.json` and `data/quality_report.md` (or the
 configured `DATA_DIR`). The report is for research and education only: it does
 not provide clinical recommendations and never automatically approves or
 rejects records.
+
+`knowledge-validate` validates a JSON object or array of source-grounded knowledge
+units, including source location, evidence grade, review status, and TCM/Western
+mapping fields. It performs no clinical inference or recommendation.
 
 `review-sync` turns quality risks and non-destructive duplicate candidates into
 idempotent SQLite tasks. Review actions are append-only audit events; they never
