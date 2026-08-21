@@ -77,6 +77,7 @@ uv run guidelineops review-reject 12 --reviewer "张医生" --role data_curator 
 - 漏洞与敏感信息披露：[`SECURITY.md`](SECURITY.md)
 - 医学知识治理审查：[`docs/medical-governance-review.md`](docs/medical-governance-review.md)
 - 上线前核对清单：[`docs/release-readiness.md`](docs/release-readiness.md)
+- AI 医学知识工程路线图：[`docs/ai-readiness-roadmap.md`](docs/ai-readiness-roadmap.md)
 
 ## 本地验证
 

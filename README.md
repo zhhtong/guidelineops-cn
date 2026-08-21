@@ -105,6 +105,9 @@ All outputs are candidate records requiring human medical review.
 
 See the [release-readiness checklist](docs/release-readiness.md) before sharing
 the system with other users or describing it as production-ready.
+The [AI-readiness roadmap](docs/ai-readiness-roadmap.md) explains which
+knowledge-governance capabilities are implemented and which model/CDSS claims
+are intentionally out of scope.
 
 ## Development
 
