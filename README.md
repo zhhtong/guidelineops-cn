@@ -90,6 +90,9 @@ It never bypasses authentication or CAPTCHA and never invents undocumented API
 endpoints. Check the license and terms of every source before redistribution.
 All outputs are candidate records requiring human medical review.
 
+See the [release-readiness checklist](docs/release-readiness.md) before sharing
+the system with other users or describing it as production-ready.
+
 ## Development
 
 ```bash

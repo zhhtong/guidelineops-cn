@@ -66,6 +66,7 @@ uv run guidelineops review-reject 12 --reviewer "张医生" --role data_curator 
 - 贡献流程和医学数据边界：[`CONTRIBUTING.md`](CONTRIBUTING.md)
 - 漏洞与敏感信息披露：[`SECURITY.md`](SECURITY.md)
 - 医学知识治理审查：[`docs/medical-governance-review.md`](docs/medical-governance-review.md)
+- 上线前核对清单：[`docs/release-readiness.md`](docs/release-readiness.md)
 
 ## 本地验证
 
