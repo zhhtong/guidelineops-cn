@@ -320,9 +320,11 @@ def create_session_factory(
 
 
 def init_database(engine: Engine) -> None:
-    """Create all persistence tables if they do not exist."""
+    """Create or migrate project persistence tables to the latest schema."""
 
-    Base.metadata.create_all(engine)
+    from .migrations import migrate_database
+
+    migrate_database(engine)
 
 
 def upsert_knowledge_unit(session: Session, unit: KnowledgeUnit) -> KnowledgeUnitRow:
