@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from typer.testing import CliRunner
@@ -118,6 +119,25 @@ def test_submitted_knowledge_unit_flows_through_medical_review_task(
             reviewer_role="medical_reviewer",
             decision="approved",
         )
+        final_task = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "knowledge_final_review"
+            )
+        )
+        assert final_task is not None
+        claim_task(
+            session,
+            final_task.id,
+            reviewer="Dr Wang",
+            reviewer_role="medical_lead",
+        )
+        decide_task(
+            session,
+            final_task.id,
+            reviewer="Dr Wang",
+            reviewer_role="medical_lead",
+            decision="approved",
+        )
         session.commit()
         session.refresh(task)
 
@@ -126,8 +146,85 @@ def test_submitted_knowledge_unit_flows_through_medical_review_task(
         submit_knowledge_unit(session, "ku-1")
         reopened = sync_knowledge_review_tasks(session)
         session.commit()
-        reopened_task = session.scalar(select(ReviewTaskRow))
+        reopened_task = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "knowledge_medical_review"
+            )
+        )
 
         assert reopened.created == 0
         assert reopened_task is not None
         assert reopened_task.status == "open"
+
+
+def test_knowledge_approval_requires_independent_final_medical_review(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'two-reviewers.db'}")
+    init_database(engine)
+
+    with Session(engine) as session:
+        upsert_knowledge_unit(
+            session,
+            _unit().model_copy(
+                update={"medical_review_status": KnowledgeReviewStatus.pending}
+            ),
+        )
+        sync_knowledge_review_tasks(session)
+        primary_task = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "knowledge_medical_review"
+            )
+        )
+        assert primary_task is not None
+
+        claim_task(
+            session,
+            primary_task.id,
+            reviewer="Dr Chen",
+            reviewer_role="medical_reviewer",
+        )
+        decide_task(
+            session,
+            primary_task.id,
+            reviewer="Dr Chen",
+            reviewer_role="medical_reviewer",
+            decision="approved",
+        )
+
+        unit_after_primary = session.get(KnowledgeUnitRow, "ku-1")
+        final_task = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "knowledge_final_review"
+            )
+        )
+        assert unit_after_primary is not None
+        assert unit_after_primary.medical_review_status == "pending"
+        assert final_task is not None
+        assert final_task.payload["triage"]["required_reviewer_role"] == "medical_lead"
+
+        with pytest.raises(ValueError, match="independent reviewer"):
+            claim_task(
+                session,
+                final_task.id,
+                reviewer="Dr Chen",
+                reviewer_role="medical_lead",
+            )
+
+        claim_task(
+            session,
+            final_task.id,
+            reviewer="Dr Wang",
+            reviewer_role="medical_lead",
+        )
+        decide_task(
+            session,
+            final_task.id,
+            reviewer="Dr Wang",
+            reviewer_role="medical_lead",
+            decision="approved",
+        )
+        session.commit()
+        session.refresh(unit_after_primary)
+
+        assert unit_after_primary.medical_review_status == "approved"

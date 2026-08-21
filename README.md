@@ -80,7 +80,10 @@ mapping fields. It performs no clinical inference or recommendation.
 `knowledge-import` validates and idempotently stores those units in SQLite;
 `knowledge-list` prints the persisted units as JSON Lines for review or export;
 `knowledge-submit` moves one unit to `pending`, and `review-sync` creates its
-medical-review task. An approved or rejected decision is reflected on the unit.
+medical-review task. High-risk knowledge uses two named reviewers: a
+`medical_reviewer` completes primary review, then an independent `medical_lead`
+must complete final review before the unit becomes `approved`. A rejection is
+reflected on the unit immediately.
 
 `review-sync` turns quality risks and non-destructive duplicate candidates into
 idempotent SQLite tasks. Review actions are append-only audit events; they never

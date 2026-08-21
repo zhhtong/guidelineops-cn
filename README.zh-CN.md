@@ -57,7 +57,7 @@ uv run guidelineops review-reject 12 --reviewer "张医生" --role data_curator 
 
 `knowledge-import` 会在校验后将知识单元幂等写入 SQLite；`knowledge-list` 以 JSON Lines 输出已持久化的知识单元，供复核或导出。
 
-`knowledge-submit` 将一个知识单元置为 `pending`，随后 `review-sync` 会创建医学审核任务；审核通过或驳回会回写知识单元状态。
+`knowledge-submit` 将一个知识单元置为 `pending`，随后 `review-sync` 会创建医学审核任务。高风险知识采用双人审核：`medical_reviewer` 完成初审后，系统自动创建 `medical_lead` 终审任务；终审人与初审人不能是同一人，只有终审通过才会将知识单元更新为 `approved`。任一环节驳回都会回写知识单元状态。
 
 `review-sync` 会把质量风险、重复候选和已提交知识单元同步为 SQLite 审核任务。任务会携带风险等级、所需审核角色和是否需要医学审核：缺失年份由 `data_curator` 处理，缺失链接/标识符由 `evidence_curator` 处理，重复候选和知识单元由 `medical_reviewer` 复核。命令行必须显式声明 `--role`，系统会拒绝与任务所需角色不符的操作，并将角色写入审计事件。该角色声明尚不是执照或机构资质验证。
 

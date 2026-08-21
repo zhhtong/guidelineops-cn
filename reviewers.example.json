@@ -11,6 +11,10 @@
     {
       "id": "medical-reviewer-example",
       "roles": ["medical_reviewer"]
+    },
+    {
+      "id": "medical-lead-example",
+      "roles": ["medical_lead"]
     }
   ]
 }

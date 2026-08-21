@@ -202,10 +202,16 @@ def sync_knowledge_review_tasks(session: Session) -> SyncResult:
             _add_event(session, task, event_type="synced", actor="system")
             created += 1
         else:
+            is_resubmitted = (
+                task.resolved_at is not None and unit.updated_at > task.resolved_at
+            )
             task.payload = payload
             task.last_seen_at = now
             task.updated_at = now
-            if task.status in _DECISIONS | {"superseded"}:
+            if (
+                task.status in _DECISIONS | {"superseded"}
+                and is_resubmitted
+            ):
                 task.status = "open"
                 task.claimed_by = None
                 task.claimed_at = None
@@ -262,6 +268,7 @@ def claim_task(
     task = _task_or_error(session, task_id)
     reviewer_role = _resolved_reviewer_role(task, reviewer_role)
     _require_reviewer_role(task, reviewer_role)
+    _require_independent_reviewer(task, reviewer)
     if task.status not in {"open", "deferred"}:
         raise ReviewQueueError(f"task {task_id} cannot be claimed from {task.status}")
     now = datetime.utcnow()
@@ -345,6 +352,8 @@ def decide_task(
         raise ReviewQueueError(f"task {task_id} is claimed by another reviewer")
     session.refresh(task)
     _update_knowledge_review_status(session, task, decision)
+    if task.task_type == "knowledge_medical_review" and decision == "approved":
+        _open_final_knowledge_review(session, task)
     _add_event(
         session,
         task,
@@ -456,7 +465,10 @@ def _update_knowledge_review_status(
 ) -> None:
     """Reflect a terminal review decision on its originating knowledge unit."""
 
-    if task.task_type != "knowledge_medical_review" or decision == "deferred":
+    if task.task_type not in {
+        "knowledge_medical_review",
+        "knowledge_final_review",
+    } or decision == "deferred":
         return
     unit_id = task.payload.get("unit_id")
     if not isinstance(unit_id, str):
@@ -464,7 +476,62 @@ def _update_knowledge_review_status(
     unit = session.get(KnowledgeUnitRow, unit_id)
     if unit is None:
         raise ReviewQueueError(f"knowledge unit not found: {unit_id}")
+    if task.task_type == "knowledge_medical_review" and decision == "approved":
+        return
     unit.medical_review_status = decision
+
+
+def _open_final_knowledge_review(session: Session, primary_task: ReviewTaskRow) -> None:
+    """Open a second, independent medical-lead review after primary approval."""
+
+    unit_id = primary_task.payload.get("unit_id")
+    version = primary_task.payload.get("version")
+    if not isinstance(unit_id, str) or not isinstance(version, str):
+        raise ReviewQueueError(f"knowledge task {primary_task.id} lacks identity")
+    fingerprint = f"knowledge-final:{unit_id}:{version}"
+    final_task = session.scalar(
+        select(ReviewTaskRow).where(ReviewTaskRow.fingerprint == fingerprint)
+    )
+    payload = {
+        **primary_task.payload,
+        "primary_reviewer": primary_task.claimed_by,
+        "triage": {
+            "risk_level": "high",
+            "required_reviewer_role": "medical_lead",
+            "medical_review_required": True,
+        },
+    }
+    if final_task is not None:
+        final_task.payload = payload
+        if final_task.status in _DECISIONS | {"superseded"}:
+            final_task.status = "open"
+            final_task.claimed_by = None
+            final_task.claimed_at = None
+            final_task.resolved_at = None
+            final_task.updated_at = datetime.utcnow()
+            _add_event(session, final_task, event_type="reopened", actor="system")
+        return
+    final_task = ReviewTaskRow(
+        fingerprint=fingerprint,
+        task_type="knowledge_final_review",
+        status="open",
+        payload=payload,
+        last_seen_at=datetime.utcnow(),
+    )
+    session.add(final_task)
+    session.flush()
+    _add_event(session, final_task, event_type="opened_after_primary", actor="system")
+
+
+def _require_independent_reviewer(task: ReviewTaskRow, reviewer: str) -> None:
+    """Do not let the primary reviewer perform the final high-risk review."""
+
+    if task.task_type != "knowledge_final_review":
+        return
+    if task.payload.get("primary_reviewer") == reviewer:
+        raise ReviewQueueError(
+            f"task {task.id} requires an independent reviewer from the primary review"
+        )
 
 
 def _resolved_reviewer_role(task: ReviewTaskRow, reviewer_role: str | None) -> str:
