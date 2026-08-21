@@ -282,6 +282,19 @@ def knowledge_unit_from_row(row: KnowledgeUnitRow) -> KnowledgeUnit:
     )
 
 
+def submit_knowledge_unit(session: Session, unit_id: str) -> KnowledgeUnitRow:
+    """Move a draft/rejected knowledge unit into the medical-review queue."""
+
+    row = session.get(KnowledgeUnitRow, unit_id)
+    if row is None:
+        raise ValueError(f"knowledge unit not found: {unit_id}")
+    if row.medical_review_status == "retracted":
+        raise ValueError(f"knowledge unit is retracted: {unit_id}")
+    row.medical_review_status = "pending"
+    session.flush()
+    return row
+
+
 def upsert_source_record(session: Session, record: SourceRecord) -> SourceRecordRow:
     """Persist one record idempotently and attach it to a canonical group.
 

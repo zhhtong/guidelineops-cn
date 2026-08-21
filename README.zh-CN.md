@@ -41,6 +41,7 @@ uv run guidelineops quality-report
 uv run guidelineops knowledge-validate knowledge.json
 uv run guidelineops knowledge-import knowledge.json
 uv run guidelineops knowledge-list
+uv run guidelineops knowledge-submit ku-copd-001
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
@@ -56,7 +57,9 @@ uv run guidelineops review-reject 12 --reviewer "张医生" --role data_curator 
 
 `knowledge-import` 会在校验后将知识单元幂等写入 SQLite；`knowledge-list` 以 JSON Lines 输出已持久化的知识单元，供复核或导出。
 
-`review-sync` 会把质量风险和重复候选同步为 SQLite 审核任务。任务会携带风险等级、所需审核角色和是否需要医学审核：缺失年份由 `data_curator` 处理，缺失链接/标识符由 `evidence_curator` 处理，重复候选由 `medical_reviewer` 复核。命令行必须显式声明 `--role`，系统会拒绝与任务所需角色不符的操作，并将角色写入审计事件。该角色声明尚不是执照或机构资质验证。
+`knowledge-submit` 将一个知识单元置为 `pending`，随后 `review-sync` 会创建医学审核任务；审核通过或驳回会回写知识单元状态。
+
+`review-sync` 会把质量风险、重复候选和已提交知识单元同步为 SQLite 审核任务。任务会携带风险等级、所需审核角色和是否需要医学审核：缺失年份由 `data_curator` 处理，缺失链接/标识符由 `evidence_curator` 处理，重复候选和知识单元由 `medical_reviewer` 复核。命令行必须显式声明 `--role`，系统会拒绝与任务所需角色不符的操作，并将角色写入审计事件。该角色声明尚不是执照或机构资质验证。
 
 审核决定保留为追加式审计事件，任务队列不会修改原始来源元数据。`approved` 仅表示完成规定的审核流程，不代表临床有效性或医疗建议。
 

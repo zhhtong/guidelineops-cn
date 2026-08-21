@@ -22,6 +22,7 @@ from .database import (
     create_engine,
     init_database,
     knowledge_unit_from_row,
+    submit_knowledge_unit,
     upsert_knowledge_unit,
     upsert_source_record,
 )
@@ -37,6 +38,7 @@ from .review_queue import (
     event_mapping,
     list_review_events,
     list_review_tasks,
+    sync_knowledge_review_tasks,
     sync_review_tasks,
     task_mapping,
 )
@@ -247,6 +249,28 @@ def knowledge_list() -> None:
             typer.echo(json.dumps(unit.model_dump(mode="json"), ensure_ascii=False))
 
 
+@app.command("knowledge-submit")
+def knowledge_submit(
+    unit_id: str = typer.Argument(..., help="Stable knowledge-unit ID."),
+) -> None:
+    """Submit one imported knowledge unit for medical review."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    with Session(engine) as session:
+        try:
+            row = submit_knowledge_unit(session, unit_id)
+            unit_payload = knowledge_unit_from_row(row).model_dump(mode="json")
+            session.commit()
+        except ValueError as error:
+            session.rollback()
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+    typer.echo(
+        json.dumps(unit_payload, ensure_ascii=False)
+    )
+
+
 @app.command("review-sync")
 def review_sync() -> None:
     """Synchronize metadata risks and duplicate candidates into review tasks."""
@@ -261,10 +285,11 @@ def review_sync() -> None:
             )
         ]
         result = sync_review_tasks(session, records)
+        knowledge_result = sync_knowledge_review_tasks(session)
         session.commit()
-    typer.echo(f"Created: {result.created}")
-    typer.echo(f"Refreshed: {result.refreshed}")
-    typer.echo(f"Superseded: {result.superseded}")
+    typer.echo(f"Created: {result.created + knowledge_result.created}")
+    typer.echo(f"Refreshed: {result.refreshed + knowledge_result.refreshed}")
+    typer.echo(f"Superseded: {result.superseded + knowledge_result.superseded}")
 
 
 @app.command("review-list")

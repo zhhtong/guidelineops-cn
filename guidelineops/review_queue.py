@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from .database import ReviewEventRow, ReviewTaskRow
+from .database import KnowledgeUnitRow, ReviewEventRow, ReviewTaskRow
 from .models import SourceRecord
 from .quality import build_quality_report
 
@@ -148,6 +148,82 @@ def sync_review_tasks(session: Session, records: list[SourceRecord]) -> SyncResu
     return SyncResult(created=created, refreshed=refreshed, superseded=superseded)
 
 
+def sync_knowledge_review_tasks(session: Session) -> SyncResult:
+    """Create medical-review tasks for knowledge units submitted as pending."""
+
+    units = list(
+        session.scalars(
+            select(KnowledgeUnitRow)
+            .where(KnowledgeUnitRow.medical_review_status == "pending")
+            .order_by(KnowledgeUnitRow.unit_id)
+        )
+    )
+    fingerprints = {
+        f"knowledge:{unit.unit_id}:{unit.version}" for unit in units
+    }
+    tasks = list(
+        session.scalars(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "knowledge_medical_review"
+            )
+        )
+    )
+    existing = {task.fingerprint: task for task in tasks}
+    created = 0
+    refreshed = 0
+    superseded = 0
+    now = datetime.utcnow()
+
+    for unit in units:
+        fingerprint = f"knowledge:{unit.unit_id}:{unit.version}"
+        payload = {
+            "unit_id": unit.unit_id,
+            "source_record_id": unit.source_record_id,
+            "domain": unit.domain,
+            "statement": unit.statement,
+            "version": unit.version,
+            "triage": {
+                "risk_level": "high",
+                "required_reviewer_role": "medical_reviewer",
+                "medical_review_required": True,
+            },
+        }
+        task = existing.get(fingerprint)
+        if task is None:
+            task = ReviewTaskRow(
+                fingerprint=fingerprint,
+                task_type="knowledge_medical_review",
+                status="open",
+                payload=payload,
+                last_seen_at=now,
+            )
+            session.add(task)
+            session.flush()
+            _add_event(session, task, event_type="synced", actor="system")
+            created += 1
+        else:
+            task.payload = payload
+            task.last_seen_at = now
+            task.updated_at = now
+            if task.status in _DECISIONS | {"superseded"}:
+                task.status = "open"
+                task.claimed_by = None
+                task.claimed_at = None
+                task.resolved_at = None
+                _add_event(session, task, event_type="reopened", actor="system")
+            refreshed += 1
+
+    for task in tasks:
+        if task.fingerprint not in fingerprints and task.status in _ACTIVE_STATUSES:
+            task.status = "superseded"
+            task.updated_at = now
+            _add_event(session, task, event_type="superseded", actor="system")
+            superseded += 1
+
+    session.flush()
+    return SyncResult(created=created, refreshed=refreshed, superseded=superseded)
+
+
 def list_review_tasks(
     session: Session, *, status: str | None = None
 ) -> list[ReviewTaskRow]:
@@ -268,6 +344,7 @@ def decide_task(
             raise ReviewQueueError(f"task {task_id} is not claimed")
         raise ReviewQueueError(f"task {task_id} is claimed by another reviewer")
     session.refresh(task)
+    _update_knowledge_review_status(session, task, decision)
     _add_event(
         session,
         task,
@@ -372,6 +449,22 @@ def _require_reviewer_role(task: ReviewTaskRow, reviewer_role: str) -> None:
         raise ReviewQueueError(
             f"task {task.id} requires reviewer role {required_role}"
         )
+
+
+def _update_knowledge_review_status(
+    session: Session, task: ReviewTaskRow, decision: str
+) -> None:
+    """Reflect a terminal review decision on its originating knowledge unit."""
+
+    if task.task_type != "knowledge_medical_review" or decision == "deferred":
+        return
+    unit_id = task.payload.get("unit_id")
+    if not isinstance(unit_id, str):
+        raise ReviewQueueError(f"knowledge task {task.id} has no unit_id")
+    unit = session.get(KnowledgeUnitRow, unit_id)
+    if unit is None:
+        raise ReviewQueueError(f"knowledge unit not found: {unit_id}")
+    unit.medical_review_status = decision
 
 
 def _resolved_reviewer_role(task: ReviewTaskRow, reviewer_role: str | None) -> str:

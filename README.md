@@ -55,6 +55,7 @@ uv run guidelineops quality-report
 uv run guidelineops knowledge-validate knowledge.json
 uv run guidelineops knowledge-import knowledge.json
 uv run guidelineops knowledge-list
+uv run guidelineops knowledge-submit ku-copd-001
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
@@ -77,7 +78,9 @@ units, including source location, evidence grade, review status, and TCM/Western
 mapping fields. It performs no clinical inference or recommendation.
 
 `knowledge-import` validates and idempotently stores those units in SQLite;
-`knowledge-list` prints the persisted units as JSON Lines for review or export.
+`knowledge-list` prints the persisted units as JSON Lines for review or export;
+`knowledge-submit` moves one unit to `pending`, and `review-sync` creates its
+medical-review task. An approved or rejected decision is reflected on the unit.
 
 `review-sync` turns quality risks and non-destructive duplicate candidates into
 idempotent SQLite tasks. Review actions are append-only audit events; they never
