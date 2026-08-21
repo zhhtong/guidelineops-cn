@@ -135,6 +135,8 @@ the system with other users or describing it as production-ready.
 The [AI-readiness roadmap](docs/ai-readiness-roadmap.md) explains which
 knowledge-governance capabilities are implemented and which model/CDSS claims
 are intentionally out of scope.
+For a resume-ready project description, see
+[`docs/resume-project-profile.md`](docs/resume-project-profile.md).
 
 ## Development
 

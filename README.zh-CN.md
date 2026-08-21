@@ -65,6 +65,8 @@ uv run guidelineops review-reject 12 --reviewer "Dr Li" --role data_curator --re
 
 上线前请阅读 [`docs/release-readiness.md`](docs/release-readiness.md)、[`docs/medical-governance-review.md`](docs/medical-governance-review.md) 和 [`docs/ai-readiness-roadmap.md`](docs/ai-readiness-roadmap.md)。本项目是研究/教学工具，不是医疗器械，不得用于真实世界临床决策。
 
+简历项目介绍和面试表达建议见 [`docs/resume-project-profile.md`](docs/resume-project-profile.md)。
+
 ## 本地验证
 
 ```bash
