@@ -137,6 +137,8 @@ knowledge-governance capabilities are implemented and which model/CDSS claims
 are intentionally out of scope.
 For a resume-ready project description, see
 [`docs/resume-project-profile.md`](docs/resume-project-profile.md).
+An offline end-to-end walkthrough with synthetic data is available in
+[`examples/demo/README.md`](examples/demo/README.md).
 
 ## Development
 

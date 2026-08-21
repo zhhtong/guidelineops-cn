@@ -1,0 +1,38 @@
+[
+  {
+    "unit_id": "ku-demo-western",
+    "source_record_id": "cnki-demo-001",
+    "domain": "western_medicine",
+    "statement": "The source recommends structured assessment of symptom burden and exacerbation history before selecting a management pathway.",
+    "source_locator": {
+      "page": 12,
+      "section": "Recommendations",
+      "quote": "Structured assessment is required before pathway selection."
+    },
+    "version": "2024-1",
+    "population": "Adults in primary care",
+    "evidence_grade": "moderate",
+    "recommendation_strength": "consensus",
+    "medical_review_status": "draft",
+    "conflict_of_interest": "Not reported"
+  },
+  {
+    "unit_id": "ku-demo-tcm",
+    "source_record_id": "cnki-demo-002",
+    "domain": "traditional_chinese_medicine",
+    "statement": "The source describes a phlegm-heat pattern as a conditional traditional-medicine concept requiring independent clinical interpretation.",
+    "source_locator": {
+      "page": 8,
+      "section": "证候与治法"
+    },
+    "version": "2023-1",
+    "population": "Adults; educational knowledge unit",
+    "evidence_grade": "not_rated",
+    "recommendation_strength": "not_applicable",
+    "medical_review_status": "draft",
+    "tcm_pattern": "phlegm-heat pattern",
+    "western_concept": "airway symptom burden",
+    "mapping_type": "conditional",
+    "mapped_unit_ids": ["ku-demo-western"]
+  }
+]

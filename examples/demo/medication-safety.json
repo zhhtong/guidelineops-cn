@@ -1,0 +1,14 @@
+[
+  {
+    "rule_id": "med-demo-001",
+    "source_unit_id": "ku-demo-western",
+    "medication_name": "Example medicine",
+    "category": "special_population",
+    "risk_level": "high",
+    "statement": "The cited source requires additional human review for pregnancy and breastfeeding before considering this medicine.",
+    "source_locator": "Table 6, safety considerations",
+    "version": "2024-1",
+    "safety_review_status": "draft",
+    "affected_population": "Pregnancy and breastfeeding"
+  }
+]

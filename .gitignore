@@ -9,6 +9,8 @@ data/quality_report.json
 data/quality_report.md
 data/*/guideline_candidates.*
 data/**/*.db
+demo-run.db
+demo-output/
 data/**/*.csv
 data/**/*.jsonl
 data/**/raw/

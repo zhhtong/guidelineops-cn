@@ -1,0 +1,4 @@
+record_id,title,authors,journal,year,doi,abstract,url
+cnki-demo-001,基层慢性阻塞性肺疾病诊疗共识,Li Wei;Zhang San,Chinese Primary Care Journal,2024,10.1000/demo-copd-001,Consensus metadata for a reproducible demonstration,https://example.org/guideline/copd-001
+cnki-demo-002,中西医结合呼吸系统疾病专家共识,Wang Wu,Integrative Medicine Review,2023,,,https://example.org/guideline/integrative-002
+cnki-demo-003,,Demo Author,Incomplete Journal,2022,,,https://example.org/guideline/incomplete-003
