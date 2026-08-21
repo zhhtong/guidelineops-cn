@@ -1,19 +1,18 @@
 # GuidelineOps-CN
 
-项目版本：`0.3.0`
+GuidelineOps-CN 是一个以来源和审计为核心的中文临床指南、专家共识及规范性文件元数据流水线。项目面向研究和教学，不用于诊断、治疗、处方或临床决策支持。
 
-GuidelineOps-CN 是一个面向研究与教育用途的临床指南、专家共识和规范元数据治理工具。它负责来源追踪、结构化导入、质量评估和人工审核队列，不提供临床建议，也不会自动批准或拒绝任何医学记录。
+## 当前能力
 
-## V0.3 功能
+- PubMed E-utilities：检索、抓取、XML 解析、限速、重试和原始响应快照。
+- Crossref REST API：标题检索、DOI 查询以及出版和许可元数据补全。
+- CNKI、万方：仅导入用户依法导出的 CSV 元数据，不绕过登录、验证码或付费墙。
+- Pydantic 数据契约、SQLite 持久化、保守的 DOI/PMID 去重和仅供人工复核的标题候选。
+- UTF-8 CSV/JSONL 导出、PubMed 优先的 `discover` 命令、确定性的质量报告和可审计审核队列。
+- 中西医知识单元、原文定位、证据等级、映射关系、撤回记录和 SHA-256 版本冻结。
+- 用药安全规则：禁忌证、相互作用、特殊人群、器官功能受损、监测和停药等主题；拒绝剂量及患者个体化处方指令。
 
-- PubMed 官方 E-utilities（ESearch、EFetch、XML 解析），支持重试、限速和原始响应快照。
-- Crossref REST API 搜索与 DOI 补全，用于发现候选文献并补充元数据。
-- CNKI/万方仅支持用户导出的 CSV 元数据导入；不绕过验证码、不自动抓取受限内容。
-- Pydantic 数据模型、SQLite 持久化，以及 DOI/PMID 去重和人工审核队列。
-- UTF-8 CSV/JSONL 导入、PubMed/Crossref 的 `discover` 工作流和质量报告。
-- 审核任务、认领、决定和追加式审计事件；审核不会修改原始来源记录。
-
-## 安装与快速开始
+## 安装与运行
 
 需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)：
 
@@ -23,15 +22,10 @@ uv run pytest
 uv run guidelineops --help
 ```
 
-PubMed/NCBI 要求提供联系邮箱：
-
-```bash
-NCBI_EMAIL=researcher@example.org uv run guidelineops pubmed-search "COPD guideline" --limit 10 --since 2015
-```
-
 常用命令：
 
 ```bash
+NCBI_EMAIL=researcher@example.org uv run guidelineops pubmed-search "COPD guideline" --limit 10 --since 2015
 uv run guidelineops crossref-search "COPD guideline" --limit 10
 uv run guidelineops crossref-enrich 10.1000/example
 uv run guidelineops import-file --source cnki exports/cnki.csv
@@ -43,53 +37,33 @@ uv run guidelineops knowledge-import knowledge.json
 uv run guidelineops knowledge-list
 uv run guidelineops knowledge-submit ku-copd-001
 uv run guidelineops knowledge-impact ku-copd-001
-uv run guidelineops knowledge-retract ku-copd-001 --reviewer "王医生" --role medical_lead --reason "来源已撤回"
-uv run guidelineops knowledge-freeze ku-copd-001 --reviewer "王医生" --role medical_lead
+uv run guidelineops knowledge-retract ku-copd-001 --reviewer "Dr Wang" --role medical_lead --reason "Source withdrawn"
+uv run guidelineops knowledge-freeze ku-copd-001 --reviewer "Dr Wang" --role medical_lead
 uv run guidelineops medication-safety-import medication-safety.json
 uv run guidelineops medication-safety-submit med-safety-001
 uv run guidelineops medication-safety-list
 uv run guidelineops review-sync
 uv run guidelineops review-list --status open
 uv run guidelineops review-events 12
-uv run guidelineops review-claim 12 --reviewer "张医生" --role data_curator
-uv run guidelineops review-reject 12 --reviewer "张医生" --role data_curator --reason "不符合指南范围"
+uv run guidelineops review-claim 12 --reviewer "Dr Li" --role data_curator
+uv run guidelineops review-reject 12 --reviewer "Dr Li" --role data_curator --reason "Not a formal guideline"
 ```
 
-`discover` 会生成 `data/guideline_candidates.csv`、`data/guideline_candidates.jsonl` 并写入 SQLite；API 原始响应保存在 `data/raw/`，同时记录 SHA-256 校验值，便于审计和复现。
+`discover` 会写入候选 CSV、JSONL 和 SQLite 数据库；原始 API 响应保存到 `data/raw/`，并记录 SHA-256。`quality-report` 只输出元数据质量信号，不做临床判断，也不会自动批准或驳回记录。
 
-`quality-report` 从 SQLite 读取数据，生成 `data/quality_report.json` 和 `data/quality_report.md`（可通过 `DATA_DIR` 调整目录），报告元数据完整性、风险信号和重复候选。
+## 医学知识治理边界
 
-`knowledge-validate` 校验来源可追溯的知识单元 JSON（包括原文定位、证据等级、审核状态以及中西医映射字段），不执行临床推理或生成治疗建议。
+`knowledge-submit` 会把知识单元置为 `pending`，`review-sync` 随后创建医学审核任务。高风险知识采用双人复核：`medical_reviewer` 初审通过后，由不同的 `medical_lead` 进行终审，只有终审通过才会变为 `approved`。若终审出现分歧，知识单元保持 `pending`，系统创建 `knowledge_escalation` 任务交给 `medical_chair`，并保留驳回原因、审核人和审计事件；这不是把最后一次操作解释成临床真理。
 
-`knowledge-import` 会在校验后将知识单元幂等写入 SQLite；`knowledge-list` 以 JSON Lines 输出已持久化的知识单元，供复核或导出。
+用药安全规则必须引用已有来源知识单元，且同样经过独立初审和终审。终审分歧会创建 `medication_safety_escalation` 任务，规则保持 `pending`。项目不输出剂量、个体化处方、诊断结论或医保报销判断。
 
-`knowledge-submit` 将一个知识单元置为 `pending`，随后 `review-sync` 会创建医学审核任务。高风险知识采用双人审核：`medical_reviewer` 完成初审后，系统自动创建 `medical_lead` 终审任务；终审人与初审人不能是同一人，只有终审通过才会将知识单元更新为 `approved`。任一环节驳回都会回写知识单元状态。
+审核角色名单可通过 `REVIEWER_REGISTRY_PATH` 指向本地 JSON 白名单（可从 [`reviewers.example.json`](reviewers.example.json) 开始）。角色只是工作流路由，不等同于执业资格、机构认证或身份核验。不要在配置中保存密码、证件号或不必要的个人信息。
 
-`knowledge-impact` 可在安全处置前找出依赖某一知识单元的映射知识；`knowledge-retract` 只允许具名 `medical_lead` 执行，会记录不可修改的撤回原因、将知识单元标为 `retracted`，并返回需要进一步复核的受影响知识单元。
+## 数据来源和版权
 
-`knowledge-freeze` 同样只允许 `medical_lead` 执行，且只有完成终审的知识单元才能冻结；冻结时会保存不可修改的内容快照和 SHA-256 校验值，后续修订不会覆盖已冻结版本。
+项目保存元数据和链接，不保存 CNKI/万方付费全文；不会绕过认证、验证码或未公开接口。重新分发前请逐一核对来源许可和网站条款。所有输出都是需要人工医学复核的候选数据。
 
-用药安全规则与普通知识单元分开保存，必须关联到已有来源知识单元，目前仅涵盖禁忌证、相互作用、特殊人群、器官功能受损、监测和停药等安全主题。系统拒绝保存剂量或针对个体患者的处方指令；提交后的规则同样需要 `medical_reviewer` 初审和独立 `medical_lead` 终审。
-
-`review-sync` 会把质量风险、重复候选和已提交知识单元同步为 SQLite 审核任务。任务会携带风险等级、所需审核角色和是否需要医学审核：缺失年份由 `data_curator` 处理，缺失链接/标识符由 `evidence_curator` 处理，重复候选和知识单元由 `medical_reviewer` 复核。命令行必须显式声明 `--role`，系统会拒绝与任务所需角色不符的操作，并将角色写入审计事件。该角色声明尚不是执照或机构资质验证。
-
-审核决定保留为追加式审计事件，任务队列不会修改原始来源元数据。`approved` 仅表示完成规定的审核流程，不代表临床有效性或医疗建议。
-
-部署时可设置 `REVIEWER_REGISTRY_PATH` 指向本地 JSON 审核人员白名单（可从 [`reviewers.example.json`](reviewers.example.json) 开始）。配置后，只有白名单中拥有已声明角色的审核人才能执行审核命令。白名单不应保存密码或不必要的个人信息；它仅提供运行层面的授权，并不证明身份、执业资格或专业资质。
-
-## 医学安全与版权边界
-
-本项目仅处理元数据、来源链接和用户提供的结构化信息。CNKI/万方适配器只接受合法导出的文件，不绕过验证码、不抓取未授权内容。使用任何来源前，请先核对许可、版权和网站条款。
-
-所有候选记录和审核任务都必须由具备相应资质的医学人员复核。项目不输出诊断、处方、剂量或治疗建议；不得把审核状态解释为临床结论。详细治理要求见 [`docs/medical-governance-review.md`](docs/medical-governance-review.md)。
-
-## 贡献与安全
-
-- 贡献流程和医学数据边界：[`CONTRIBUTING.md`](CONTRIBUTING.md)
-- 漏洞与敏感信息披露：[`SECURITY.md`](SECURITY.md)
-- 医学知识治理审查：[`docs/medical-governance-review.md`](docs/medical-governance-review.md)
-- 上线前核对清单：[`docs/release-readiness.md`](docs/release-readiness.md)
-- AI 医学知识工程路线图：[`docs/ai-readiness-roadmap.md`](docs/ai-readiness-roadmap.md)
+上线前请阅读 [`docs/release-readiness.md`](docs/release-readiness.md)、[`docs/medical-governance-review.md`](docs/medical-governance-review.md) 和 [`docs/ai-readiness-roadmap.md`](docs/ai-readiness-roadmap.md)。本项目是研究/教学工具，不是医疗器械，不得用于真实世界临床决策。
 
 ## 本地验证
 

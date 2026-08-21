@@ -89,7 +89,11 @@ mapping fields. It performs no clinical inference or recommendation.
 medical-review task. High-risk knowledge uses two named reviewers: a
 `medical_reviewer` completes primary review, then an independent `medical_lead`
 must complete final review before the unit becomes `approved`. A rejection is
-reflected on the unit immediately.
+reflected on the unit immediately unless it is a final-review disagreement. In
+that case the unit remains `pending` and an open `knowledge_escalation` task is
+created for a `medical_chair`; the escalation preserves both the rejection
+reason and reviewer identity instead of silently treating the last decision as
+clinical truth.
 
 `knowledge-impact` finds mapping-dependent units before a safety action.
 `knowledge-retract` requires a named `medical_lead`, records an immutable reason,
@@ -102,6 +106,8 @@ They must cite an existing source unit and are limited to contraindications,
 interactions, special populations, organ impairment, monitoring, or withdrawal.
 The project rejects dosage and patient-specific prescribing instructions; submitted
 rules follow independent `medical_reviewer` and `medical_lead` review.
+If the final reviewer disagrees, the rule remains `pending` and a
+`medication_safety_escalation` task is routed to `medical_chair`.
 
 `review-sync` turns quality risks and non-destructive duplicate candidates into
 idempotent SQLite tasks. Review actions are append-only audit events; they never

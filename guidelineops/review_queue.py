@@ -428,10 +428,16 @@ def decide_task(
     session.refresh(task)
     _update_knowledge_review_status(session, task, decision)
     _update_medication_safety_review_status(session, task, decision)
+    _update_escalation_review_status(session, task, decision)
     if task.task_type == "knowledge_medical_review" and decision == "approved":
         _open_final_knowledge_review(session, task)
     if task.task_type == "medication_safety_review" and decision == "approved":
         _open_final_medication_safety_review(session, task)
+    if decision == "rejected" and task.task_type in {
+        "knowledge_final_review",
+        "medication_safety_final_review",
+    }:
+        _open_disagreement_escalation(session, task, reason=reason)
     _add_event(
         session,
         task,
@@ -556,6 +562,10 @@ def _update_knowledge_review_status(
         raise ReviewQueueError(f"knowledge unit not found: {unit_id}")
     if task.task_type == "knowledge_medical_review" and decision == "approved":
         return
+    if task.task_type == "knowledge_final_review" and decision == "rejected":
+        # A final disagreement is escalated below; retain pending until the
+        # medical-chair decision resolves the conflict.
+        return
     unit.medical_review_status = decision
 
 
@@ -627,6 +637,13 @@ def _update_medication_safety_review_status(
         return
     if task.task_type == "medication_safety_review" and decision == "approved":
         return
+    if (
+        task.task_type == "medication_safety_final_review"
+        and decision == "rejected"
+    ):
+        # Keep the rule pending while the independent disagreement escalation
+        # is awaiting medical-chair adjudication.
+        return
     rule_id = task.payload.get("rule_id")
     if not isinstance(rule_id, str):
         raise ReviewQueueError(f"medication task {task.id} has no rule_id")
@@ -634,6 +651,35 @@ def _update_medication_safety_review_status(
     if rule is None:
         raise ReviewQueueError(f"medication safety rule not found: {rule_id}")
     rule.safety_review_status = decision
+
+
+def _update_escalation_review_status(
+    session: Session, task: ReviewTaskRow, decision: str
+) -> None:
+    """Apply a medical-chair adjudication to the originating content."""
+
+    if task.task_type not in {
+        "knowledge_escalation",
+        "medication_safety_escalation",
+    } or decision == "deferred":
+        return
+    status = decision
+    if task.task_type == "knowledge_escalation":
+        unit_id = task.payload.get("unit_id")
+        if not isinstance(unit_id, str):
+            raise ReviewQueueError(f"escalation task {task.id} has no unit_id")
+        unit = session.get(KnowledgeUnitRow, unit_id)
+        if unit is None:
+            raise ReviewQueueError(f"knowledge unit not found: {unit_id}")
+        unit.medical_review_status = status
+        return
+    rule_id = task.payload.get("rule_id")
+    if not isinstance(rule_id, str):
+        raise ReviewQueueError(f"escalation task {task.id} has no rule_id")
+    rule = session.get(MedicationSafetyRuleRow, rule_id)
+    if rule is None:
+        raise ReviewQueueError(f"medication safety rule not found: {rule_id}")
+    rule.safety_review_status = status
 
 
 def _open_final_medication_safety_review(
@@ -678,6 +724,47 @@ def _open_final_medication_safety_review(
     session.add(final_task)
     session.flush()
     _add_event(session, final_task, event_type="opened_after_primary", actor="system")
+
+
+def _open_disagreement_escalation(
+    session: Session, final_task: ReviewTaskRow, *, reason: str | None
+) -> None:
+    """Escalate a final-review rejection instead of silently closing content."""
+
+    unit_key = final_task.payload.get("unit_id") or final_task.payload.get("rule_id")
+    version = final_task.payload.get("version")
+    if not isinstance(unit_key, str) or not isinstance(version, str):
+        raise ReviewQueueError(f"final review task {final_task.id} lacks identity")
+    fingerprint = f"escalation:{final_task.task_type}:{unit_key}:{version}"
+    existing = session.scalar(
+        select(ReviewTaskRow).where(ReviewTaskRow.fingerprint == fingerprint)
+    )
+    if existing is not None:
+        return
+    payload = {
+        **final_task.payload,
+        "reason": reason,
+        "rejected_by": final_task.claimed_by,
+        "triage": {
+            "risk_level": "critical",
+            "required_reviewer_role": "medical_chair",
+            "medical_review_required": True,
+        },
+    }
+    escalation = ReviewTaskRow(
+        fingerprint=fingerprint,
+        task_type=(
+            "knowledge_escalation"
+            if final_task.task_type == "knowledge_final_review"
+            else "medication_safety_escalation"
+        ),
+        status="open",
+        payload=payload,
+        last_seen_at=datetime.utcnow(),
+    )
+    session.add(escalation)
+    session.flush()
+    _add_event(session, escalation, event_type="escalated", actor="system")
 
 
 def _resolved_reviewer_role(task: ReviewTaskRow, reviewer_role: str | None) -> str:

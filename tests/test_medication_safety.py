@@ -262,6 +262,99 @@ def test_medication_safety_rule_requires_two_medical_reviews(tmp_path) -> None:
         assert safety_row.safety_review_status == "approved"
 
 
+def test_medication_safety_disagreement_opens_escalation(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'medication-disagreement.db'}")
+    init_database(engine)
+    rule = MedicationSafetyRule(
+        rule_id="med-safety-001",
+        source_unit_id="ku-1",
+        medication_name="Example medicine",
+        category="contraindication",
+        risk_level="high",
+        statement=(
+            "Avoid use when the cited source lists the documented contraindication."
+        ),
+        source_locator="Table 4",
+        version="2024-1",
+        safety_review_status="pending",
+    )
+
+    with Session(engine) as session:
+        upsert_knowledge_unit(
+            session,
+            KnowledgeUnit(
+                unit_id="ku-1",
+                source_record_id="pubmed:1",
+                domain="western_medicine",
+                statement="Evidence source statement.",
+                source_locator={"section": "Safety"},
+                version="2024-1",
+            ),
+        )
+        upsert_medication_safety_rule(session, rule)
+        sync_medication_safety_review_tasks(session)
+        primary = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "medication_safety_review"
+            )
+        )
+        assert primary is not None
+        claim_task(
+            session,
+            primary.id,
+            reviewer="Dr Chen",
+            reviewer_role="medical_reviewer",
+        )
+        decide_task(
+            session,
+            primary.id,
+            reviewer="Dr Chen",
+            reviewer_role="medical_reviewer",
+            decision="approved",
+        )
+        final = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "medication_safety_final_review"
+            )
+        )
+        assert final is not None
+        claim_task(session, final.id, reviewer="Dr Wang", reviewer_role="medical_lead")
+        decide_task(
+            session,
+            final.id,
+            reviewer="Dr Wang",
+            reviewer_role="medical_lead",
+            decision="rejected",
+            reason="Safety evidence requires adjudication",
+        )
+
+        safety_row = session.get(MedicationSafetyRuleRow, "med-safety-001")
+        escalation = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "medication_safety_escalation"
+            )
+        )
+
+        assert safety_row is not None
+        assert safety_row.safety_review_status == "pending"
+        assert escalation is not None
+        assert escalation.payload["reason"] == "Safety evidence requires adjudication"
+        claim_task(
+            session,
+            escalation.id,
+            reviewer="Dr Chair",
+            reviewer_role="medical_chair",
+        )
+        decide_task(
+            session,
+            escalation.id,
+            reviewer="Dr Chair",
+            reviewer_role="medical_chair",
+            decision="approved",
+        )
+        assert safety_row.safety_review_status == "approved"
+
+
 def test_medication_safety_submit_cli_marks_rule_pending(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "medication.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path}")

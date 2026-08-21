@@ -234,6 +234,83 @@ def test_knowledge_approval_requires_independent_final_medical_review(
         assert unit_after_primary.medical_review_status == "approved"
 
 
+def test_final_knowledge_disagreement_opens_escalation_without_approving(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'knowledge-disagreement.db'}")
+    init_database(engine)
+
+    with Session(engine) as session:
+        upsert_knowledge_unit(
+            session,
+            _unit().model_copy(
+                update={"medical_review_status": KnowledgeReviewStatus.pending}
+            ),
+        )
+        sync_knowledge_review_tasks(session)
+        primary = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "knowledge_medical_review"
+            )
+        )
+        assert primary is not None
+        claim_task(
+            session,
+            primary.id,
+            reviewer="Dr Chen",
+            reviewer_role="medical_reviewer",
+        )
+        decide_task(
+            session,
+            primary.id,
+            reviewer="Dr Chen",
+            reviewer_role="medical_reviewer",
+            decision="approved",
+        )
+        final = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "knowledge_final_review"
+            )
+        )
+        assert final is not None
+        claim_task(session, final.id, reviewer="Dr Wang", reviewer_role="medical_lead")
+        decide_task(
+            session,
+            final.id,
+            reviewer="Dr Wang",
+            reviewer_role="medical_lead",
+            decision="rejected",
+            reason="Evidence interpretation differs",
+        )
+        unit = session.get(KnowledgeUnitRow, "ku-1")
+        escalation = session.scalar(
+            select(ReviewTaskRow).where(
+                ReviewTaskRow.task_type == "knowledge_escalation"
+            )
+        )
+
+        assert unit is not None
+        assert escalation is not None
+        assert unit.medical_review_status == "pending"
+        assert escalation.status == "open"
+        assert escalation.payload["reason"] == "Evidence interpretation differs"
+        claim_task(
+            session,
+            escalation.id,
+            reviewer="Dr Chair",
+            reviewer_role="medical_chair",
+        )
+        decide_task(
+            session,
+            escalation.id,
+            reviewer="Dr Chair",
+            reviewer_role="medical_chair",
+            decision="approved",
+            reason="Chair adjudication accepted the source interpretation",
+        )
+        assert unit.medical_review_status == "approved"
+
+
 def test_retraction_records_reason_and_finds_dependent_knowledge(
     tmp_path: Path,
 ) -> None:

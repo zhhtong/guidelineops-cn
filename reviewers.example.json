@@ -15,6 +15,10 @@
     {
       "id": "medical-lead-example",
       "roles": ["medical_lead"]
+    },
+    {
+      "id": "medical-chair-example",
+      "roles": ["medical_chair"]
     }
   ]
 }
