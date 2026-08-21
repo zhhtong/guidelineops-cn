@@ -52,6 +52,9 @@ uv run guidelineops import-file --source cnki exports/cnki.csv
 uv run guidelineops import-file --source wanfang exports/wanfang.csv
 uv run guidelineops discover --disease "COPD guideline" --since 2015 --limit 20
 uv run guidelineops quality-report
+uv run guidelineops database-status
+uv run guidelineops database-backup backups/
+DATABASE_URL="sqlite:///./data/recovery-copy.db" uv run guidelineops database-restore backups/guidelineops-backup-YYYYMMDDTHHMMSSZ.db
 uv run guidelineops knowledge-validate knowledge.json
 uv run guidelineops knowledge-import knowledge.json
 uv run guidelineops knowledge-list
@@ -78,6 +81,14 @@ signals to `data/quality_report.json` and `data/quality_report.md` (or the
 configured `DATA_DIR`). The report is for research and education only: it does
 not provide clinical recommendations and never automatically approves or
 rejects records.
+
+`database-status` reports the managed SQLite schema version. `database-backup`
+creates a SQLite online-backup artifact and a JSON manifest containing its
+SHA-256, byte count and schema version. Restore into a new `DATABASE_URL` by
+default; replacing an existing database requires `database-restore --force`.
+Always store artifacts outside the repository and run a restore drill before
+relying on a backup. Backup files can contain operational metadata and audit
+records, so they must not be committed to public Git repositories.
 
 `knowledge-validate` validates a JSON object or array of source-grounded knowledge
 units, including source location, evidence grade, review status, and TCM/Western

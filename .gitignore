@@ -11,6 +11,7 @@ data/*/guideline_candidates.*
 data/**/*.db
 demo-run.db
 demo-output/
+backups/
 data/**/*.csv
 data/**/*.jsonl
 data/**/raw/

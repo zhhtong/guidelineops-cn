@@ -214,6 +214,8 @@ def _load_and_verify_manifest(backup_path: Path) -> dict[str, object]:
         raise BackupError(
             f"backup manifest is invalid JSON: {manifest_path}"
         ) from error
+    if not isinstance(payload, dict):
+        raise BackupError("backup manifest must contain a JSON object")
     required = {"path", "sha256", "byte_count", "schema_version", "created_at"}
     if not required <= payload.keys():
         raise BackupError("backup manifest is missing required fields")
@@ -221,6 +223,8 @@ def _load_and_verify_manifest(backup_path: Path) -> dict[str, object]:
         raise BackupError("backup manifest does not match the selected artifact")
     if _sha256(backup_path) != payload["sha256"]:
         raise BackupError("backup SHA-256 does not match its manifest")
+    if backup_path.stat().st_size != int(payload["byte_count"]):
+        raise BackupError("backup byte count does not match its manifest")
     if int(payload["schema_version"]) > LATEST_SCHEMA_VERSION:
         raise BackupError(
             "backup schema version is newer than this GuidelineOps release"

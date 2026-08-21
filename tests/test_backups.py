@@ -63,6 +63,17 @@ def test_restore_rejects_modified_backup(tmp_path: Path) -> None:
         restore_sqlite_backup(backup.path, f"sqlite:///{tmp_path / 'restored.db'}")
 
 
+def test_restore_rejects_manifest_with_wrong_byte_count(tmp_path: Path) -> None:
+    source_url = _seed_database(tmp_path / "source.db")
+    backup = backup_sqlite_database(source_url, tmp_path / "backups")
+    manifest = json.loads(backup.manifest_path.read_text(encoding="utf-8"))
+    manifest["byte_count"] = 0
+    backup.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(BackupError, match="byte count"):
+        restore_sqlite_backup(backup.path, f"sqlite:///{tmp_path / 'restored.db'}")
+
+
 def test_restore_requires_force_to_replace_existing_database(tmp_path: Path) -> None:
     source_url = _seed_database(tmp_path / "source.db")
     backup = backup_sqlite_database(source_url, tmp_path / "backups")

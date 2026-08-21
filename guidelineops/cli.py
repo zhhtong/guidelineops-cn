@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
+from .backups import BackupError, backup_sqlite_database, restore_sqlite_backup
 from .config import Settings
 from .database import (
     CanonicalGuidelineRow,
@@ -36,6 +37,7 @@ from .dedup import group_records
 from .export import export_records
 from .knowledge import KnowledgeUnit
 from .medication_safety import MedicationSafetyRule
+from .migrations import MigrationError, schema_status
 from .models import SourceRecord
 from .quality import build_quality_report, render_markdown, report_json
 from .review_queue import (
@@ -214,6 +216,67 @@ def quality_report() -> None:
     typer.echo(f"Records: {report.total_records}")
     typer.echo(f"JSON: {json_path}")
     typer.echo(f"Markdown: {markdown_path}")
+
+
+@app.command("database-status")
+def database_status() -> None:
+    """Print the managed SQLite schema version for the configured database."""
+
+    settings = Settings()
+    engine = _database_engine(settings)
+    try:
+        status = schema_status(engine)
+    except MigrationError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(
+        json.dumps(
+            {
+                "database_url": settings.database_url,
+                "current_version": status.current_version,
+                "latest_version": status.latest_version,
+                "pending_versions": status.pending_versions,
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+@app.command("database-backup")
+def database_backup(
+    destination: Path = typer.Argument(
+        ..., help="Directory where the backup database and manifest are written."
+    ),
+) -> None:
+    """Create a manifest-verified SQLite backup of the configured database."""
+
+    try:
+        result = backup_sqlite_database(Settings().database_url, destination)
+    except (BackupError, MigrationError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(json.dumps(result.mapping(), ensure_ascii=False))
+
+
+@app.command("database-restore")
+def database_restore(
+    backup: Path = typer.Argument(..., exists=True, readable=True),
+    force: bool = typer.Option(
+        False, help="Allow replacing an existing configured database file."
+    ),
+) -> None:
+    """Restore a verified backup into the configured SQLite database target."""
+
+    try:
+        result = restore_sqlite_backup(
+            backup,
+            Settings().database_url,
+            force=force,
+        )
+    except BackupError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(json.dumps(result.mapping(), ensure_ascii=False))
 
 
 @app.command("knowledge-validate")

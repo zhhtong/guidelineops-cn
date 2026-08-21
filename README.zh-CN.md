@@ -32,6 +32,9 @@ uv run guidelineops import-file --source cnki exports/cnki.csv
 uv run guidelineops import-file --source wanfang exports/wanfang.csv
 uv run guidelineops discover --disease "COPD guideline" --since 2015 --limit 20
 uv run guidelineops quality-report
+uv run guidelineops database-status
+uv run guidelineops database-backup backups/
+DATABASE_URL="sqlite:///./data/recovery-copy.db" uv run guidelineops database-restore backups/guidelineops-backup-YYYYMMDDTHHMMSSZ.db
 uv run guidelineops knowledge-validate knowledge.json
 uv run guidelineops knowledge-import knowledge.json
 uv run guidelineops knowledge-list
@@ -50,6 +53,8 @@ uv run guidelineops review-reject 12 --reviewer "Dr Li" --role data_curator --re
 ```
 
 `discover` 会写入候选 CSV、JSONL 和 SQLite 数据库；原始 API 响应保存到 `data/raw/`，并记录 SHA-256。`quality-report` 只输出元数据质量信号，不做临床判断，也不会自动批准或驳回记录。
+
+`database-status` 显示当前 SQLite schema 版本。`database-backup` 使用 SQLite 在线备份 API 创建数据库副本，并生成含 SHA-256、文件大小和 schema 版本的 JSON 清单。恢复时建议先写入新的 `DATABASE_URL`；若要替换已有数据库，必须显式使用 `database-restore --force`。备份文件可能含有操作元数据和审核记录，应放在仓库外并在实际依赖前完成恢复演练，不能提交到公开 Git 仓库。
 
 ## 医学知识治理边界
 
