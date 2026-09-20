@@ -1,8 +1,12 @@
 # GuidelineOps-CN
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 [![CI](actions/workflows/ci.yml/badge.svg)](actions/workflows/ci.yml)
 
 **A provenance-first metadata and knowledge-governance pipeline for Chinese clinical guidelines, expert consensuses, and related normative documents.**
+
+**面向中国临床指南、专家共识及相关规范性文献的来源可追溯元数据与知识治理管道。** 项目保存来源快照、规范化元数据、保守识别重复候选，并通过人工审核任务和不可变审计事件管理知识生命周期；它不生成诊断、治疗、处方或患者个体化临床建议。完整中文介绍见 [`README.zh-CN.md`](README.zh-CN.md)。
 
 > [!IMPORTANT]
 > GuidelineOps-CN is research and education software. It does not provide diagnosis, treatment, prescribing, or patient-specific clinical decision support.
