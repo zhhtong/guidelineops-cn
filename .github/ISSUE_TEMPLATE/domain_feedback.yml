@@ -1,0 +1,47 @@
+name: Domain feedback
+description: Review evidence governance, metadata quality, or medical-review workflows.
+title: "[Domain feedback]: "
+labels: ["domain-feedback"]
+body:
+  - type: dropdown
+    id: perspective
+    attributes:
+      label: Reviewer perspective
+      options:
+        - Guideline development
+        - Evidence-based medicine
+        - Medical informatics
+        - Information science or library science
+        - Healthcare AI
+        - Other relevant perspective
+    validations:
+      required: true
+  - type: input
+    id: stage
+    attributes:
+      label: Pipeline or review stage
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: Observed governance gap
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Clinical-safety or traceability relevance
+  - type: checkboxes
+    id: data-safety
+    attributes:
+      label: Data-safety confirmation
+      options:
+        - label: I have not included paywalled full text, patient data, credentials, or confidential institutional information.
+          required: true

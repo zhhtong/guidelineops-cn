@@ -1,0 +1,43 @@
+name: Metadata source proposal
+description: Propose a legally accessible metadata source or connector.
+title: "[Source]: "
+labels: ["source-proposal"]
+body:
+  - type: input
+    id: source
+    attributes:
+      label: Source name
+    validations:
+      required: true
+  - type: input
+    id: documentation
+    attributes:
+      label: Official documentation URL
+    validations:
+      required: true
+  - type: textarea
+    id: access
+    attributes:
+      label: Access method
+      description: Describe a documented API, public export, or user-provided offline export.
+    validations:
+      required: true
+  - type: textarea
+    id: terms
+    attributes:
+      label: Licensing and terms notes
+    validations:
+      required: true
+  - type: textarea
+    id: fields
+    attributes:
+      label: Metadata fields and provenance expectations
+    validations:
+      required: true
+  - type: checkboxes
+    id: data-safety
+    attributes:
+      label: Data-safety confirmation
+      options:
+        - label: This proposal does not request paywall, authentication, CAPTCHA, undocumented endpoint, or access-control bypass.
+          required: true

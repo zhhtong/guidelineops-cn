@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and open-ended feedback
+    url: https://github.com/zhhtong/guidelineops-cn/discussions
+    about: Discuss evidence governance, metadata quality, review workflows, and roadmap ideas.
+  - name: Security reports
+    url: https://github.com/zhhtong/guidelineops-cn/security/policy
+    about: Follow the private reporting instructions; do not disclose vulnerabilities or sensitive data in a public issue.

@@ -2,19 +2,42 @@
 
 [![CI](actions/workflows/ci.yml/badge.svg)](actions/workflows/ci.yml)
 
-GuidelineOps-CN v0.3.0 is a reproducible, provenance-first metadata pipeline for
-discovering Chinese clinical guidelines, expert consensuses, and related
-normative documents. It is designed for research and education, not for
-diagnosis, treatment, prescribing, or clinical decision support.
+**A provenance-first metadata and knowledge-governance pipeline for Chinese clinical guidelines, expert consensuses, and related normative documents.**
 
-## What works in v0.3
+> [!IMPORTANT]
+> GuidelineOps-CN is research and education software. It does not provide diagnosis, treatment, prescribing, or patient-specific clinical decision support.
 
-- PubMed E-utilities: ESearch, EFetch, XML parsing, rate limiting, retries, and raw snapshots.
-- Crossref REST API: title search, DOI lookup, publication/license metadata.
-- CNKI and Wanfang: offline import of user-exported CSV metadata only.
-- Pydantic records, SQLite persistence, conservative DOI/PMID deduplication, and review-only title candidates.
-- UTF-8 CSV/JSONL exports and a PubMed-first `discover` command.
-- Deterministic metadata quality reports plus an auditable human review queue.
+GuidelineOps-CN v0.3.0 makes evidence discovery and review reproducible: source snapshots, normalized records, conservative duplicate candidates, metadata quality signals, human review tasks, immutable audit events, and controlled knowledge-unit lifecycle actions.
+
+## What works in v0.3.0
+
+- PubMed E-utilities and Crossref metadata retrieval with retries and raw snapshots.
+- Offline import of user-exported CNKI and Wanfang CSV metadata; no paywall or CAPTCHA bypass.
+- Pydantic validation, SQLite persistence, DOI/PMID deduplication, and review-only title candidates.
+- Deterministic quality reports and auditable, role-routed review tasks.
+- Source-grounded knowledge units, two-stage review for high-risk content, retraction impact analysis, and protected snapshots.
+
+## Quick start
+
+Python 3.11+ and [uv](https://docs.astral.sh/uv/) are required:
+
+```bash
+uv sync
+uv run pytest
+uv run guidelineops --help
+```
+
+## Feedback wanted
+
+Medical-informatics, evidence-based medicine, guideline-development, information-science, and healthcare-AI reviewers are invited to comment on:
+
+1. Which metadata quality risks or provenance fields are missing?
+2. Are the reviewer roles, escalation paths, and knowledge lifecycle realistic?
+3. Which legally accessible metadata sources or synthetic examples should be supported next?
+
+Use [GitHub Discussions](https://github.com/zhhtong/guidelineops-cn/discussions) for open-ended feedback and [Issues](https://github.com/zhhtong/guidelineops-cn/issues/new/choose) for reproducible defects or scoped proposals. Never submit paywalled full text, patient data, credentials, or confidential institutional material.
+
+**Related project:** [AmendBench](https://github.com/zhhtong/AmendBench) explores traceable, human-controlled impact assessment for clinical-trial protocol amendments. The projects are complementary; they are not currently integrated.
 
 ```mermaid
 flowchart LR
@@ -27,15 +50,7 @@ flowchart LR
   G --> H["Review tasks + audit events"]
 ```
 
-## Install
-
-Python 3.11+ and [uv](https://docs.astral.sh/uv/) are required:
-
-```bash
-uv sync
-uv run pytest
-uv run guidelineops --help
-```
+## Search and workflow commands
 
 For PubMed, configure a contact email as required by NCBI:
 
