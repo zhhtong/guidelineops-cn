@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -7,6 +8,8 @@ from typer.testing import CliRunner
 from guidelineops.cli import app
 from guidelineops.database import create_engine, init_database, upsert_source_record
 from guidelineops.models import SourceRecord
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def _seed_source_record(database_path: Path) -> None:
@@ -92,7 +95,7 @@ def test_review_cli_requires_declared_reviewer_role(
     )
 
     assert result.exit_code == 2
-    assert "--role" in result.output
+    assert "--role" in ANSI_ESCAPE.sub("", result.output)
 
 
 def test_review_cli_enforces_configured_reviewer_registry(
